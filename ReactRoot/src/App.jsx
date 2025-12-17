@@ -44,8 +44,10 @@ function App() {
     )
   }
 
+  const basename = import.meta.env.PROD ? '/ManeuverPrototype' : '/'
+
   return (
-    <Router basename="/ManeuverPrototype">
+    <Router basename={basename}>
       <div className="app">
         {user && <Navbar user={user} />}
         <Routes>
