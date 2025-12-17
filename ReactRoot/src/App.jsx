@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import Auth from './components/Auth'
@@ -8,6 +8,19 @@ import SteepTurn from './components/SteepTurn'
 import SlowFlight from './components/SlowFlight'
 import Navbar from './components/Navbar'
 import './App.css'
+
+function RedirectHandler() {
+  const location = useLocation()
+  
+  useEffect(() => {
+    if (location.search.includes('?/')) {
+      const path = location.search.replace('?/', '').replace(/~and~/g, '&')
+      window.history.replaceState(null, '', path)
+    }
+  }, [location])
+  
+  return null
+}
 
 function App() {
   const [user, setUser] = useState(null)
@@ -48,6 +61,7 @@ function App() {
 
   return (
     <Router basename={basename}>
+      <RedirectHandler />
       <div className="app">
         {user && <Navbar user={user} />}
         <Routes>
