@@ -1,12 +1,30 @@
 import asyncio
 import json
 import math
+import socket
 import websockets
 from SimConnect import SimConnect, AircraftRequests
 
 HOST = "0.0.0.0"
 PORT = 8765
 HZ = 15  # good for attitude indicator
+
+def get_local_ip():
+    """Get the local IP address for LAN access"""
+    try:
+        # Connect to a remote address to determine local IP
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            # Fallback: get hostname IP
+            hostname = socket.gethostname()
+            return socket.gethostbyname(hostname)
+        except Exception:
+            return None
 
 clients = set()
 
@@ -37,7 +55,24 @@ async def main():
     sm = SimConnect()
     aq = AircraftRequests(sm, _time=0)
     print("SimConnect connected")
-    print(f"WebSocket server running on ws://127.0.0.1:{PORT} (LAN: ws://<your-pc-ip>:{PORT})")
+    
+    local_ip = get_local_ip()
+    print(f"\n{'='*60}")
+    print(f"WebSocket server running:")
+    print(f"  Local:  ws://127.0.0.1:{PORT}")
+    if local_ip:
+        print(f"  LAN:    ws://{local_ip}:{PORT}")
+        print(f"\n📱 For mobile access:")
+        print(f"  1. Make sure your phone is on the same Wi-Fi network")
+        print(f"  2. Open http://{local_ip}/index.html on your phone")
+        print(f"  3. Allow port {PORT} in Windows Firewall if prompted")
+    else:
+        print(f"  LAN:    ws://<your-pc-ip>:{PORT}")
+        print(f"\n📱 For mobile access:")
+        print(f"  1. Find your PC's IP: Open Command Prompt and type 'ipconfig'")
+        print(f"  2. Look for 'IPv4 Address' under your network adapter")
+        print(f"  3. Open http://<your-pc-ip>/index.html on your phone")
+    print(f"{'='*60}\n")
 
     async with websockets.serve(ws_handler, HOST, PORT):
         interval = 1.0 / max(1, HZ)

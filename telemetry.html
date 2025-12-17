@@ -316,9 +316,8 @@
     </div>
   </div>
 
+  <script src="ws-connection.js"></script>
   <script>
-    const WS_URL = "ws://127.0.0.1:8765";
-
     const statusEl = document.getElementById("status");
     const worldEl = document.getElementById("world");
     const rawEl = document.getElementById("raw");
@@ -347,13 +346,23 @@
     let ws;
 
     function connect() {
+      if (!MSFSConnection.init()) {
+        setStatus("No connection URL configured", false);
+        // Show mobile config hint
+        const hint = document.querySelector('.hint');
+        if (hint && !MSFSConnection.getPCIP()) {
+          hint.innerHTML = hint.innerHTML + '<br/><br/><strong>📱 Mobile:</strong> Access this page from your PC\'s IP address (e.g., <code>http://192.168.1.100/telemetry.html</code>) or configure the IP in the main page.';
+        }
+        return;
+      }
+
       setStatus("Connecting...", false);
 
-      ws = new WebSocket(WS_URL);
+      MSFSConnection.on('open', () => {
+        setStatus("Connected", true);
+      });
 
-      ws.onopen = () => setStatus("Connected", true);
-
-      ws.onmessage = (e) => {
+      MSFSConnection.on('message', (e) => {
         let data;
         try {
           data = JSON.parse(e.data);
@@ -384,14 +393,17 @@
 
         worldEl.style.transform =
           `translate(-50%, -50%) rotate(${bankDeg}deg) translateY(${pitchPx}px)`;
-      };
+      });
 
-      ws.onerror = () => setStatus("WebSocket error", false);
+      MSFSConnection.on('error', () => {
+        setStatus("WebSocket error", false);
+      });
 
-      ws.onclose = () => {
+      MSFSConnection.on('close', () => {
         setStatus("Disconnected. Retrying...", false);
-        setTimeout(connect, 1000);
-      };
+      });
+
+      MSFSConnection.connect();
     }
 
     connect();
