@@ -5,7 +5,7 @@ a = Analysis(
     ['msfs_ws_bridge.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('C:\\Users\\trist\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\SimConnect\\SimConnect.dll', 'SimConnect')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

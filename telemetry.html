@@ -3,11 +3,47 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>MSFS Artificial Horizon</title>
+  <title>Live Telemetry - MSFS Maneuver Tracker</title>
   <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --green: #238636;
+      --green-bright: #3fb950;
+      --red: #da3633;
+      --red-bright: #f85149;
+      --blue: #58a6ff;
+    }
+
+    * { box-sizing: border-box; }
+
     body {
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      margin: 24px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 28px;
+      font-weight: 600;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      margin-bottom: 24px;
+      font-size: 14px;
     }
 
     .row {
@@ -18,13 +54,21 @@
     }
 
     .card {
-      border: 1px solid #ddd;
+      background: var(--card);
+      border: 1px solid var(--border);
       border-radius: 12px;
-      padding: 16px;
-      box-shadow: 0 2px 10px rgba(0,0,0,.06);
+      padding: 20px;
     }
 
-    /* Horizon instrument */
+    .card h2, .card h3 {
+      margin: 0 0 16px 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
     .instrument {
       width: 340px;
     }
@@ -34,13 +78,12 @@
       height: 320px;
       border-radius: 50%;
       overflow: hidden;
-      border: 10px solid #111;
+      border: 10px solid #000;
       position: relative;
       background: #000;
       margin: 8px auto 0;
     }
 
-    /* Moving world (rotates for bank, translates for pitch) */
     .world {
       position: absolute;
       left: 50%;
@@ -77,7 +120,6 @@
       box-shadow: 0 0 6px rgba(255,255,255,.35);
     }
 
-    /* Fixed airplane reference */
     .aircraft {
       position: absolute;
       left: 50%;
@@ -110,7 +152,6 @@
       border-radius: 50%;
     }
 
-    /* Bank tick marks (simple) */
     .ticks {
       position: absolute;
       inset: 0;
@@ -129,17 +170,24 @@
     }
     .tick.small { height: 10px; opacity: .7; }
 
-    /* Status + readouts */
-    .status {
-      font-size: 14px;
-      margin-top: 8px;
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+      margin-top: 12px;
     }
-    .status.ok { color: #0a7a2f; }
-    .status.bad { color: #b00020; }
+
+    .status-badge.disconnected { background: rgba(218,54,51,0.2); color: var(--red-bright); }
+    .status-badge.connected { background: rgba(35,134,54,0.2); color: var(--green-bright); }
 
     .readouts {
       min-width: 300px;
       max-width: 520px;
+      flex: 1;
     }
 
     .grid {
@@ -150,83 +198,125 @@
       margin-top: 8px;
     }
 
+    .grid > div:nth-child(odd) {
+      color: var(--text-muted);
+    }
+
+    .grid > div:nth-child(even) {
+      font-family: 'Consolas', monospace;
+      font-weight: 600;
+    }
+
     code {
-      background: #f6f6f6;
+      background: rgba(0,0,0,0.3);
       padding: 2px 6px;
       border-radius: 6px;
+      font-family: 'Consolas', monospace;
+      color: var(--blue);
     }
 
     .hint {
       font-size: 13px;
-      color: #555;
-      margin-top: 10px;
-      line-height: 1.35;
+      color: var(--text-muted);
+      margin-top: 12px;
+      line-height: 1.5;
+    }
+
+    #raw {
+      background: rgba(0,0,0,0.3);
+      padding: 12px;
+      border-radius: 10px;
+      max-height: 240px;
+      overflow: auto;
+      font-family: 'Consolas', monospace;
+      font-size: 12px;
+      color: var(--text);
+      border: 1px solid var(--border);
+      margin-top: 12px;
+    }
+
+    #raw::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    #raw::-webkit-scrollbar-track {
+      background: rgba(0,0,0,0.2);
+      border-radius: 4px;
+    }
+
+    #raw::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    #raw::-webkit-scrollbar-thumb:hover {
+      background: #444c56;
     }
   </style>
 </head>
 <body>
-  <h1>MSFS Artificial Horizon (SimConnect → WebSocket)</h1>
+  <div class="container">
+    <h1>Live Telemetry</h1>
+    <p class="subtitle">Real-time flight data from Microsoft Flight Simulator</p>
 
-  <div class="row">
-    <div class="card instrument">
-      <h3 style="margin:0;">Attitude Indicator</h3>
+    <div class="row">
+      <div class="card instrument">
+        <h2>Attitude Indicator</h2>
 
-      <div class="horizon-wrap" aria-label="Artificial Horizon">
-        <div id="world" class="world">
-          <div class="sky"></div>
-          <div class="ground"></div>
-          <div class="horizon-line"></div>
+        <div class="horizon-wrap" aria-label="Artificial Horizon">
+          <div id="world" class="world">
+            <div class="sky"></div>
+            <div class="ground"></div>
+            <div class="horizon-line"></div>
+          </div>
+
+          <div class="ticks">
+            <div class="tick small" style="transform: rotate(-60deg);"></div>
+            <div class="tick"       style="transform: rotate(-45deg);"></div>
+            <div class="tick small" style="transform: rotate(-30deg);"></div>
+            <div class="tick small" style="transform: rotate(-20deg);"></div>
+            <div class="tick small" style="transform: rotate(-10deg);"></div>
+            <div class="tick small" style="transform: rotate( 10deg);"></div>
+            <div class="tick small" style="transform: rotate( 20deg);"></div>
+            <div class="tick small" style="transform: rotate( 30deg);"></div>
+            <div class="tick"       style="transform: rotate( 45deg);"></div>
+            <div class="tick small" style="transform: rotate( 60deg);"></div>
+          </div>
+
+          <div class="aircraft">
+            <div class="wing left"></div>
+            <div class="wing right"></div>
+            <div class="center"></div>
+          </div>
         </div>
 
-        <div class="ticks">
-          <!-- simple bank ticks -->
-          <div class="tick small" style="transform: rotate(-60deg);"></div>
-          <div class="tick"       style="transform: rotate(-45deg);"></div>
-          <div class="tick small" style="transform: rotate(-30deg);"></div>
-          <div class="tick small" style="transform: rotate(-20deg);"></div>
-          <div class="tick small" style="transform: rotate(-10deg);"></div>
-          <div class="tick small" style="transform: rotate( 10deg);"></div>
-          <div class="tick small" style="transform: rotate( 20deg);"></div>
-          <div class="tick small" style="transform: rotate( 30deg);"></div>
-          <div class="tick"       style="transform: rotate( 45deg);"></div>
-          <div class="tick small" style="transform: rotate( 60deg);"></div>
-        </div>
-
-        <div class="aircraft">
-          <div class="wing left"></div>
-          <div class="wing right"></div>
-          <div class="center"></div>
+        <div id="status" class="status-badge disconnected">● Disconnected</div>
+        <div class="hint">
+          If you're testing on the same PC, keep <code>ws://127.0.0.1:8765</code>.<br/>
+          From another device, use <code>ws://&lt;your-pc-ip&gt;:8765</code> and allow the port in Windows Firewall.
         </div>
       </div>
 
-      <div id="status" class="status bad">Connecting…</div>
-      <div class="hint">
-        If you’re testing on the same PC, keep <code>ws://127.0.0.1:8765</code>.<br/>
-        From another device, use <code>ws://&lt;your-pc-ip&gt;:8765</code> and allow the port in Windows Firewall.
-      </div>
-    </div>
+      <div class="card readouts">
+        <h2>Live Readouts</h2>
+        <div class="grid" id="grid">
+          <div>Pitch</div><div><span id="pitch">—</span>°</div>
+          <div>Bank</div><div><span id="bank">—</span>°</div>
+          <div>Heading (true)</div><div><span id="hdg">—</span>°</div>
+          <div>IAS</div><div><span id="ias">—</span> kt</div>
+          <div>Altitude</div><div><span id="alt">—</span> ft</div>
+          <div>VS</div><div><span id="vs">—</span> fpm</div>
+          <div>On ground</div><div><span id="onground">—</span></div>
+          <div>Lat / Lon</div><div><span id="pos">—</span></div>
+        </div>
 
-    <div class="card readouts">
-      <h3 style="margin:0;">Live Readouts</h3>
-      <div class="grid" id="grid">
-        <div>Pitch</div><div><span id="pitch">—</span>°</div>
-        <div>Bank</div><div><span id="bank">—</span>°</div>
-        <div>Heading (true)</div><div><span id="hdg">—</span>°</div>
-        <div>IAS</div><div><span id="ias">—</span> kt</div>
-        <div>Altitude</div><div><span id="alt">—</span> ft</div>
-        <div>VS</div><div><span id="vs">—</span> fpm</div>
-        <div>On ground</div><div><span id="onground">—</span></div>
-        <div>Lat / Lon</div><div><span id="pos">—</span></div>
+        <h2 style="margin-top:24px;">Raw JSON</h2>
+        <pre id="raw">—</pre>
       </div>
-
-      <h3 style="margin:16px 0 8px;">Raw JSON</h3>
-      <pre id="raw" style="background:#f6f6f6;padding:12px;border-radius:10px;max-height:240px;overflow:auto;">—</pre>
     </div>
   </div>
 
   <script>
-    // Change this if connecting from another device:
-    // const WS_URL = "ws://192.168.1.50:8765";
     const WS_URL = "ws://127.0.0.1:8765";
 
     const statusEl = document.getElementById("status");
@@ -242,8 +332,6 @@
     const ongroundEl = document.getElementById("onground");
     const posEl = document.getElementById("pos");
 
-    // Simple mapping: pitch degrees -> pixels of vertical shift.
-    // Tune to taste. 1 degree = 3 px gives a nice feel.
     const PX_PER_DEG_PITCH = 3;
 
     function fmt(n, digits = 1) {
@@ -251,24 +339,19 @@
       return Number(n).toFixed(digits);
     }
 
-    function fmtInt(n) {
-      if (n === null || n === undefined || Number.isNaN(n)) return "—";
-      return Math.round(Number(n)).toString();
-    }
-
-    function setStatus(text, ok) {
-      statusEl.textContent = text;
-      statusEl.className = "status " + (ok ? "ok" : "bad");
+    function setStatus(text, connected) {
+      statusEl.textContent = "● " + text;
+      statusEl.className = "status-badge " + (connected ? "connected" : "disconnected");
     }
 
     let ws;
 
     function connect() {
-      setStatus(`Connecting to ${WS_URL}…`, false);
+      setStatus("Connecting...", false);
 
       ws = new WebSocket(WS_URL);
 
-      ws.onopen = () => setStatus("Connected ✅", true);
+      ws.onopen = () => setStatus("Connected", true);
 
       ws.onmessage = (e) => {
         let data;
@@ -278,14 +361,11 @@
           return;
         }
 
-        // Raw payload display
         rawEl.textContent = JSON.stringify(data, null, 2);
 
-        // Pull values (matches your Python keys)
         const pitch = data.pitch_deg;
         const bank = data.bank_deg;
 
-        // Update readouts
         pitchEl.textContent = fmt(pitch, 1);
         bankEl.textContent = fmt(bank, 1);
         hdgEl.textContent = fmt(data.hdg_true, 0);
@@ -299,9 +379,6 @@
           posEl.textContent = "—";
         }
 
-        // Horizon transform:
-        // - bank rotates the world opposite the airplane (so horizon tilts correctly)
-        // - pitch moves the world up/down (nose up -> horizon goes down)
         const pitchPx = (pitch == null) ? 0 : (-Number(pitch) * PX_PER_DEG_PITCH);
         const bankDeg = (bank == null) ? 0 : (-Number(bank));
 
@@ -309,10 +386,10 @@
           `translate(-50%, -50%) rotate(${bankDeg}deg) translateY(${pitchPx}px)`;
       };
 
-      ws.onerror = () => setStatus("WebSocket error ❌", false);
+      ws.onerror = () => setStatus("WebSocket error", false);
 
       ws.onclose = () => {
-        setStatus("Disconnected. Retrying…", false);
+        setStatus("Disconnected. Retrying...", false);
         setTimeout(connect, 1000);
       };
     }

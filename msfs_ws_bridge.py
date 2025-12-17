@@ -114,4 +114,12 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        print("\nShutting down...")
+    except ConnectionError as e:
+        print(f"\n[ERROR] Connection Error: {e}")
+        print("\nMake sure Microsoft Flight Simulator is running")
+        print("and you are loaded into a flight (in the cockpit).")
+        input("\nPress Enter to exit...")
+    except Exception as e:
+        print(f"\n[ERROR] {e}")
+        input("\nPress Enter to exit...")
