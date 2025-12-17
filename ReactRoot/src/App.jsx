@@ -44,7 +44,7 @@ function App() {
   }
 
   return (
-    <Router>
+    <Router basename="/ManeuverPrototype">
       <div className="app">
         {user && <Navbar user={user} />}
         <Routes>
