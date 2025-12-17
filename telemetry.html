@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>MSFS Artificial Horizon</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 24px;
+    }
+
+    .row {
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      align-items: flex-start;
+    }
+
+    .card {
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 2px 10px rgba(0,0,0,.06);
+    }
+
+    /* Horizon instrument */
+    .instrument {
+      width: 340px;
+    }
+
+    .horizon-wrap {
+      width: 320px;
+      height: 320px;
+      border-radius: 50%;
+      overflow: hidden;
+      border: 10px solid #111;
+      position: relative;
+      background: #000;
+      margin: 8px auto 0;
+    }
+
+    /* Moving world (rotates for bank, translates for pitch) */
+    .world {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 700px;
+      height: 700px;
+      transform: translate(-50%, -50%);
+      will-change: transform;
+    }
+
+    .sky {
+      position: absolute;
+      left: 0; top: 0;
+      width: 100%;
+      height: 50%;
+      background: #4aa3ff;
+    }
+
+    .ground {
+      position: absolute;
+      left: 0; bottom: 0;
+      width: 100%;
+      height: 50%;
+      background: #b0733b;
+    }
+
+    .horizon-line {
+      position: absolute;
+      left: 0;
+      top: 50%;
+      width: 100%;
+      height: 4px;
+      background: rgba(255,255,255,.9);
+      box-shadow: 0 0 6px rgba(255,255,255,.35);
+    }
+
+    /* Fixed airplane reference */
+    .aircraft {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 140px;
+      height: 40px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+    }
+
+    .wing {
+      position: absolute;
+      top: 18px;
+      width: 55px;
+      height: 4px;
+      background: #fff;
+      border-radius: 4px;
+    }
+    .wing.left { left: 0; }
+    .wing.right { right: 0; }
+
+    .center {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      width: 14px;
+      height: 14px;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      border-radius: 50%;
+    }
+
+    /* Bank tick marks (simple) */
+    .ticks {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .tick {
+      position: absolute;
+      left: 50%;
+      top: 8px;
+      width: 4px;
+      height: 14px;
+      transform-origin: 50% 152px;
+      background: rgba(255,255,255,.85);
+      border-radius: 2px;
+    }
+    .tick.small { height: 10px; opacity: .7; }
+
+    /* Status + readouts */
+    .status {
+      font-size: 14px;
+      margin-top: 8px;
+    }
+    .status.ok { color: #0a7a2f; }
+    .status.bad { color: #b00020; }
+
+    .readouts {
+      min-width: 300px;
+      max-width: 520px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      gap: 8px 12px;
+      font-size: 15px;
+      margin-top: 8px;
+    }
+
+    code {
+      background: #f6f6f6;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+
+    .hint {
+      font-size: 13px;
+      color: #555;
+      margin-top: 10px;
+      line-height: 1.35;
+    }
+  </style>
+</head>
+<body>
+  <h1>MSFS Artificial Horizon (SimConnect → WebSocket)</h1>
+
+  <div class="row">
+    <div class="card instrument">
+      <h3 style="margin:0;">Attitude Indicator</h3>
+
+      <div class="horizon-wrap" aria-label="Artificial Horizon">
+        <div id="world" class="world">
+          <div class="sky"></div>
+          <div class="ground"></div>
+          <div class="horizon-line"></div>
+        </div>
+
+        <div class="ticks">
+          <!-- simple bank ticks -->
+          <div class="tick small" style="transform: rotate(-60deg);"></div>
+          <div class="tick"       style="transform: rotate(-45deg);"></div>
+          <div class="tick small" style="transform: rotate(-30deg);"></div>
+          <div class="tick small" style="transform: rotate(-20deg);"></div>
+          <div class="tick small" style="transform: rotate(-10deg);"></div>
+          <div class="tick small" style="transform: rotate( 10deg);"></div>
+          <div class="tick small" style="transform: rotate( 20deg);"></div>
+          <div class="tick small" style="transform: rotate( 30deg);"></div>
+          <div class="tick"       style="transform: rotate( 45deg);"></div>
+          <div class="tick small" style="transform: rotate( 60deg);"></div>
+        </div>
+
+        <div class="aircraft">
+          <div class="wing left"></div>
+          <div class="wing right"></div>
+          <div class="center"></div>
+        </div>
+      </div>
+
+      <div id="status" class="status bad">Connecting…</div>
+      <div class="hint">
+        If you’re testing on the same PC, keep <code>ws://127.0.0.1:8765</code>.<br/>
+        From another device, use <code>ws://&lt;your-pc-ip&gt;:8765</code> and allow the port in Windows Firewall.
+      </div>
+    </div>
+
+    <div class="card readouts">
+      <h3 style="margin:0;">Live Readouts</h3>
+      <div class="grid" id="grid">
+        <div>Pitch</div><div><span id="pitch">—</span>°</div>
+        <div>Bank</div><div><span id="bank">—</span>°</div>
+        <div>Heading (true)</div><div><span id="hdg">—</span>°</div>
+        <div>IAS</div><div><span id="ias">—</span> kt</div>
+        <div>Altitude</div><div><span id="alt">—</span> ft</div>
+        <div>VS</div><div><span id="vs">—</span> fpm</div>
+        <div>On ground</div><div><span id="onground">—</span></div>
+        <div>Lat / Lon</div><div><span id="pos">—</span></div>
+      </div>
+
+      <h3 style="margin:16px 0 8px;">Raw JSON</h3>
+      <pre id="raw" style="background:#f6f6f6;padding:12px;border-radius:10px;max-height:240px;overflow:auto;">—</pre>
+    </div>
+  </div>
+
+  <script>
+    // Change this if connecting from another device:
+    // const WS_URL = "ws://192.168.1.50:8765";
+    const WS_URL = "ws://127.0.0.1:8765";
+
+    const statusEl = document.getElementById("status");
+    const worldEl = document.getElementById("world");
+    const rawEl = document.getElementById("raw");
+
+    const pitchEl = document.getElementById("pitch");
+    const bankEl = document.getElementById("bank");
+    const hdgEl = document.getElementById("hdg");
+    const iasEl = document.getElementById("ias");
+    const altEl = document.getElementById("alt");
+    const vsEl = document.getElementById("vs");
+    const ongroundEl = document.getElementById("onground");
+    const posEl = document.getElementById("pos");
+
+    // Simple mapping: pitch degrees -> pixels of vertical shift.
+    // Tune to taste. 1 degree = 3 px gives a nice feel.
+    const PX_PER_DEG_PITCH = 3;
+
+    function fmt(n, digits = 1) {
+      if (n === null || n === undefined || Number.isNaN(n)) return "—";
+      return Number(n).toFixed(digits);
+    }
+
+    function fmtInt(n) {
+      if (n === null || n === undefined || Number.isNaN(n)) return "—";
+      return Math.round(Number(n)).toString();
+    }
+
+    function setStatus(text, ok) {
+      statusEl.textContent = text;
+      statusEl.className = "status " + (ok ? "ok" : "bad");
+    }
+
+    let ws;
+
+    function connect() {
+      setStatus(`Connecting to ${WS_URL}…`, false);
+
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => setStatus("Connected ✅", true);
+
+      ws.onmessage = (e) => {
+        let data;
+        try {
+          data = JSON.parse(e.data);
+        } catch {
+          return;
+        }
+
+        // Raw payload display
+        rawEl.textContent = JSON.stringify(data, null, 2);
+
+        // Pull values (matches your Python keys)
+        const pitch = data.pitch_deg;
+        const bank = data.bank_deg;
+
+        // Update readouts
+        pitchEl.textContent = fmt(pitch, 1);
+        bankEl.textContent = fmt(bank, 1);
+        hdgEl.textContent = fmt(data.hdg_true_deg ?? data.heading_deg ?? data.hdg_deg, 0);
+        iasEl.textContent = fmt(data.ias_kt, 0);
+        altEl.textContent = fmt(data.alt_ft, 0);
+        vsEl.textContent = fmt(data.vs_fpm, 0);
+        ongroundEl.textContent = (data.on_ground === null || data.on_ground === undefined) ? "—" : String(!!data.on_ground);
+        if (data.lat != null && data.lon != null) {
+          posEl.textContent = `${Number(data.lat).toFixed(5)}, ${Number(data.lon).toFixed(5)}`;
+        } else {
+          posEl.textContent = "—";
+        }
+
+        // Horizon transform:
+        // - bank rotates the world opposite the airplane (so horizon tilts correctly)
+        // - pitch moves the world up/down (nose up -> horizon goes down)
+        const pitchPx = (pitch == null) ? 0 : (-Number(pitch) * PX_PER_DEG_PITCH);
+        const bankDeg = (bank == null) ? 0 : (-Number(bank));
+
+        worldEl.style.transform =
+          `translate(-50%, -50%) rotate(${bankDeg}deg) translateY(${pitchPx}px)`;
+      };
+
+      ws.onerror = () => setStatus("WebSocket error ❌", false);
+
+      ws.onclose = () => {
+        setStatus("Disconnected. Retrying…", false);
+        setTimeout(connect, 1000);
+      };
+    }
+
+    connect();
+  </script>
+</body>
+</html>
