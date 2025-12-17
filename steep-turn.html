@@ -1,0 +1,829 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Steep Turn Tracker - ACS PA.V.A</title>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --green: #238636;
+      --green-bright: #3fb950;
+      --red: #da3633;
+      --red-bright: #f85149;
+      --yellow: #d29922;
+      --blue: #58a6ff;
+      --purple: #a371f7;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 24px;
+      min-height: 100vh;
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 28px;
+      font-weight: 600;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      margin-bottom: 24px;
+      font-size: 14px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 800px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .card h2 {
+      margin: 0 0 16px 0;
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+
+    .status-badge.disconnected { background: rgba(218,54,51,0.2); color: var(--red-bright); }
+    .status-badge.ready { background: rgba(35,134,54,0.2); color: var(--green-bright); }
+    .status-badge.tracking { background: rgba(88,166,255,0.2); color: var(--blue); }
+    .status-badge.complete { background: rgba(163,113,247,0.2); color: var(--purple); }
+
+    .big-button {
+      width: 100%;
+      padding: 16px 24px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.15s;
+      margin-top: 16px;
+    }
+
+    .big-button.start {
+      background: var(--green);
+      color: white;
+    }
+    .big-button.start:hover { background: var(--green-bright); }
+    .big-button.start:disabled {
+      background: var(--border);
+      color: var(--text-muted);
+      cursor: not-allowed;
+    }
+
+    .big-button.stop {
+      background: var(--red);
+      color: white;
+    }
+    .big-button.stop:hover { background: var(--red-bright); }
+
+    .big-button.reset {
+      background: var(--border);
+      color: var(--text);
+    }
+    .big-button.reset:hover { background: #444c56; }
+
+    .entry-values {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .entry-item {
+      background: rgba(0,0,0,0.3);
+      padding: 12px;
+      border-radius: 8px;
+    }
+
+    .entry-item label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .entry-item .value {
+      font-size: 24px;
+      font-weight: 600;
+      font-family: 'Consolas', monospace;
+    }
+
+    .heading-ring {
+      width: 280px;
+      height: 280px;
+      margin: 0 auto 20px;
+      position: relative;
+    }
+
+    .heading-ring svg {
+      width: 100%;
+      height: 100%;
+      transform: rotate(-90deg);
+    }
+
+    .heading-ring .bg-circle {
+      fill: none;
+      stroke: var(--border);
+      stroke-width: 12;
+    }
+
+    .heading-ring .progress-circle {
+      fill: none;
+      stroke: var(--blue);
+      stroke-width: 12;
+      stroke-linecap: round;
+      transition: stroke-dashoffset 0.1s;
+    }
+
+    .heading-ring .center-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
+    }
+
+    .heading-ring .degrees {
+      font-size: 48px;
+      font-weight: 700;
+      font-family: 'Consolas', monospace;
+    }
+
+    .heading-ring .label {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .tolerance-item {
+      margin-bottom: 20px;
+    }
+
+    .tolerance-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .tolerance-name {
+      font-weight: 500;
+    }
+
+    .tolerance-value {
+      font-family: 'Consolas', monospace;
+      font-size: 18px;
+    }
+
+    .tolerance-value.pass { color: var(--green-bright); }
+    .tolerance-value.warn { color: var(--yellow); }
+    .tolerance-value.fail { color: var(--red-bright); }
+
+    .tolerance-bar {
+      height: 8px;
+      background: var(--border);
+      border-radius: 4px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .tolerance-bar .fill {
+      position: absolute;
+      top: 0;
+      height: 100%;
+      border-radius: 4px;
+      transition: all 0.1s;
+    }
+
+    .tolerance-bar .center-line {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      width: 2px;
+      height: 100%;
+      background: var(--text-muted);
+      transform: translateX(-50%);
+    }
+
+    .tolerance-limits {
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    .direction-indicator {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .direction-btn {
+      flex: 1;
+      padding: 12px;
+      border: 2px solid var(--border);
+      background: transparent;
+      color: var(--text-muted);
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: default;
+      transition: all 0.15s;
+    }
+
+    .direction-btn.active {
+      border-color: var(--blue);
+      color: var(--blue);
+      background: rgba(88,166,255,0.1);
+    }
+
+    .grade-card {
+      text-align: center;
+      padding: 32px;
+    }
+
+    .grade-card .grade {
+      font-size: 72px;
+      font-weight: 700;
+    }
+
+    .grade-card .grade.pass { color: var(--green-bright); }
+    .grade-card .grade.fail { color: var(--red-bright); }
+
+    .grade-card .summary {
+      margin-top: 16px;
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .deviations-list {
+      margin-top: 20px;
+      text-align: left;
+    }
+
+    .deviation-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .deviation-row:last-child { border-bottom: none; }
+
+    .deviation-row .param { color: var(--text-muted); }
+    .deviation-row .max { font-family: 'Consolas', monospace; }
+    .deviation-row .max.pass { color: var(--green-bright); }
+    .deviation-row .max.fail { color: var(--red-bright); }
+
+    .live-values {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .live-item {
+      text-align: center;
+      padding: 8px;
+      background: rgba(0,0,0,0.2);
+      border-radius: 6px;
+    }
+
+    .live-item .val {
+      font-size: 20px;
+      font-weight: 600;
+      font-family: 'Consolas', monospace;
+    }
+
+    .live-item .lbl {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Steep Turn Tracker</h1>
+    <p class="subtitle">ACS PA.V.A — Private Pilot Steep Turns</p>
+
+    <div class="grid">
+      <div class="left-col">
+        <div class="card">
+          <h2>Control</h2>
+          <div id="statusBadge" class="status-badge disconnected">● Disconnected</div>
+
+          <button id="startBtn" class="big-button start" disabled>Start Tracking</button>
+
+          <div class="entry-values" id="entryValues" style="display:none;">
+            <div class="entry-item">
+              <label>Entry Heading</label>
+              <div class="value" id="entryHdg">---°</div>
+            </div>
+            <div class="entry-item">
+              <label>Entry Altitude</label>
+              <div class="value" id="entryAlt">--- ft</div>
+            </div>
+            <div class="entry-item">
+              <label>Entry Airspeed</label>
+              <div class="value" id="entrySpd">--- kt</div>
+            </div>
+            <div class="entry-item">
+              <label>Target Bank</label>
+              <div class="value">45°</div>
+            </div>
+          </div>
+
+          <div class="direction-indicator" id="dirIndicator" style="display:none;">
+            <div class="direction-btn" id="dirLeft">← LEFT</div>
+            <div class="direction-btn" id="dirRight">RIGHT →</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top: 16px;">
+          <h2>Live Data</h2>
+          <div class="live-values">
+            <div class="live-item">
+              <div class="val" id="liveHdg">---</div>
+              <div class="lbl">HDG °</div>
+            </div>
+            <div class="live-item">
+              <div class="val" id="liveAlt">---</div>
+              <div class="lbl">ALT ft</div>
+            </div>
+            <div class="live-item">
+              <div class="val" id="liveSpd">---</div>
+              <div class="lbl">IAS kt</div>
+            </div>
+            <div class="live-item">
+              <div class="val" id="liveBank">---</div>
+              <div class="lbl">BANK °</div>
+            </div>
+            <div class="live-item">
+              <div class="val" id="liveG">---</div>
+              <div class="lbl">G-FORCE</div>
+            </div>
+            <div class="live-item">
+              <div class="val" id="liveYaw">---</div>
+              <div class="lbl">YAW °/s</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="right-col">
+        <div class="card" id="trackingCard" style="display:none;">
+          <h2>Turn Progress</h2>
+
+          <div class="heading-ring">
+            <svg viewBox="0 0 100 100">
+              <circle class="bg-circle" cx="50" cy="50" r="42" />
+              <circle class="progress-circle" id="progressCircle" cx="50" cy="50" r="42"
+                stroke-dasharray="263.89" stroke-dashoffset="263.89" />
+            </svg>
+            <div class="center-text">
+              <div class="degrees" id="turnDegrees">0°</div>
+              <div class="label">of 360°</div>
+            </div>
+          </div>
+
+          <div class="tolerance-item">
+            <div class="tolerance-header">
+              <span class="tolerance-name">Altitude (±100 ft)</span>
+              <span class="tolerance-value" id="altDev">0 ft</span>
+            </div>
+            <div class="tolerance-bar">
+              <div class="fill" id="altFill" style="left:50%;width:0;background:var(--green);"></div>
+              <div class="center-line"></div>
+            </div>
+            <div class="tolerance-limits"><span>-100</span><span>0</span><span>+100</span></div>
+          </div>
+
+          <div class="tolerance-item">
+            <div class="tolerance-header">
+              <span class="tolerance-name">Airspeed (±10 kt)</span>
+              <span class="tolerance-value" id="spdDev">0 kt</span>
+            </div>
+            <div class="tolerance-bar">
+              <div class="fill" id="spdFill" style="left:50%;width:0;background:var(--green);"></div>
+              <div class="center-line"></div>
+            </div>
+            <div class="tolerance-limits"><span>-10</span><span>0</span><span>+10</span></div>
+          </div>
+
+          <div class="tolerance-item">
+            <div class="tolerance-header">
+              <span class="tolerance-name">Bank Angle (45° ±5°)</span>
+              <span class="tolerance-value" id="bankDev">0°</span>
+            </div>
+            <div class="tolerance-bar">
+              <div class="fill" id="bankFill" style="left:50%;width:0;background:var(--green);"></div>
+              <div class="center-line"></div>
+            </div>
+            <div class="tolerance-limits"><span>40°</span><span>45°</span><span>50°</span></div>
+          </div>
+        </div>
+
+        <div class="card grade-card" id="gradeCard" style="display:none;">
+          <h2>Maneuver Complete</h2>
+          <div class="grade" id="gradeText">PASS</div>
+          <div class="summary" id="gradeSummary">Rolled out within ±10° of entry heading</div>
+
+          <div class="deviations-list">
+            <div class="deviation-row">
+              <span class="param">Max Altitude Deviation</span>
+              <span class="max" id="maxAltDev">+0 ft</span>
+            </div>
+            <div class="deviation-row">
+              <span class="param">Max Airspeed Deviation</span>
+              <span class="max" id="maxSpdDev">+0 kt</span>
+            </div>
+            <div class="deviation-row">
+              <span class="param">Max Bank Deviation</span>
+              <span class="max" id="maxBankDev">0°</span>
+            </div>
+            <div class="deviation-row">
+              <span class="param">Rollout Heading Error</span>
+              <span class="max" id="rolloutErr">0°</span>
+            </div>
+          </div>
+
+          <button id="resetBtn" class="big-button reset">Reset & Try Again</button>
+        </div>
+
+        <div class="card" id="waitingCard">
+          <h2>Waiting to Start</h2>
+          <p style="color:var(--text-muted);line-height:1.6;">
+            <strong>ACS Standards (PA.V.A.S5):</strong><br>
+            • Altitude: ±100 feet<br>
+            • Airspeed: ±10 knots<br>
+            • Bank: 45° ±5°<br>
+            • Rollout heading: ±10°<br><br>
+            Establish level flight at maneuvering speed, then click <strong>Start Tracking</strong> to capture entry parameters and begin monitoring your 360° steep turn.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const WS_URL = "ws://127.0.0.1:8765";
+
+    const statusBadge = document.getElementById("statusBadge");
+    const startBtn = document.getElementById("startBtn");
+    const resetBtn = document.getElementById("resetBtn");
+    const entryValues = document.getElementById("entryValues");
+    const dirIndicator = document.getElementById("dirIndicator");
+    const trackingCard = document.getElementById("trackingCard");
+    const gradeCard = document.getElementById("gradeCard");
+    const waitingCard = document.getElementById("waitingCard");
+
+    let ws;
+    let state = "disconnected";
+    let entry = null;
+    let tracking = {
+      turnDirection: null,
+      totalTurn: 0,
+      lastHdg: null,
+      maxAltDev: 0,
+      maxSpdDev: 0,
+      maxBankDev: 0,
+      busted: { alt: false, spd: false, bank: false }
+    };
+
+    function setStatus(newState, text) {
+      state = newState;
+      statusBadge.className = "status-badge " + newState;
+      statusBadge.innerHTML = "● " + text;
+    }
+
+    function updateButton() {
+      if (state === "disconnected") {
+        startBtn.disabled = true;
+        startBtn.textContent = "Start Tracking";
+        startBtn.className = "big-button start";
+      } else if (state === "ready") {
+        startBtn.disabled = false;
+        startBtn.textContent = "Start Tracking";
+        startBtn.className = "big-button start";
+      } else if (state === "tracking") {
+        startBtn.disabled = false;
+        startBtn.textContent = "Cancel";
+        startBtn.className = "big-button stop";
+      } else if (state === "complete") {
+        startBtn.disabled = true;
+        startBtn.textContent = "Complete";
+        startBtn.className = "big-button start";
+      }
+    }
+
+    function showPanel(panel) {
+      waitingCard.style.display = panel === "waiting" ? "block" : "none";
+      trackingCard.style.display = panel === "tracking" ? "block" : "none";
+      gradeCard.style.display = panel === "grade" ? "block" : "none";
+    }
+
+    function updateLiveData(data) {
+      document.getElementById("liveHdg").textContent = data.hdg_true != null ? Math.round(data.hdg_true) : "---";
+      document.getElementById("liveAlt").textContent = data.alt_ft != null ? Math.round(data.alt_ft) : "---";
+      document.getElementById("liveSpd").textContent = data.ias_kt != null ? Math.round(data.ias_kt) : "---";
+      document.getElementById("liveBank").textContent = data.bank_deg != null ? Math.round(Math.abs(data.bank_deg)) : "---";
+      document.getElementById("liveG").textContent = data.g_force != null ? data.g_force.toFixed(1) : "---";
+      document.getElementById("liveYaw").textContent = data.yaw_rate != null ? Math.round(data.yaw_rate) : "---";
+    }
+
+    function startTracking(data) {
+      entry = {
+        hdg: data.hdg_true,
+        alt: data.alt_ft,
+        spd: data.ias_kt
+      };
+
+      tracking = {
+        turnDirection: null,
+        totalTurn: 0,
+        lastHdg: entry.hdg,
+        maxAltDev: 0,
+        maxSpdDev: 0,
+        maxBankDev: 0,
+        busted: { alt: false, spd: false, bank: false }
+      };
+
+      document.getElementById("entryHdg").textContent = Math.round(entry.hdg) + "°";
+      document.getElementById("entryAlt").textContent = Math.round(entry.alt) + " ft";
+      document.getElementById("entrySpd").textContent = Math.round(entry.spd) + " kt";
+
+      entryValues.style.display = "grid";
+      dirIndicator.style.display = "flex";
+      document.getElementById("dirLeft").classList.remove("active");
+      document.getElementById("dirRight").classList.remove("active");
+
+      setStatus("tracking", "Tracking Turn");
+      updateButton();
+      showPanel("tracking");
+    }
+
+    function cancelTracking() {
+      entry = null;
+      entryValues.style.display = "none";
+      dirIndicator.style.display = "none";
+      setStatus("ready", "Ready");
+      updateButton();
+      showPanel("waiting");
+    }
+
+    function normalizeAngle(angle) {
+      while (angle > 180) angle -= 360;
+      while (angle < -180) angle += 360;
+      return angle;
+    }
+
+    function updateTracking(data) {
+      if (!entry) return;
+
+      const hdg = data.hdg_true;
+      const alt = data.alt_ft;
+      const spd = data.ias_kt;
+      const bank = data.bank_deg;
+
+      if (hdg == null || alt == null || spd == null || bank == null) return;
+
+      if (tracking.turnDirection === null && Math.abs(bank) > 20) {
+        tracking.turnDirection = bank > 0 ? "right" : "left";
+        document.getElementById("dir" + (tracking.turnDirection === "left" ? "Left" : "Right")).classList.add("active");
+      }
+
+      if (tracking.turnDirection && tracking.lastHdg != null) {
+        let delta = hdg - tracking.lastHdg;
+        delta = normalizeAngle(delta);
+
+        if (tracking.turnDirection === "right" && delta > 0) {
+          tracking.totalTurn += delta;
+        } else if (tracking.turnDirection === "left" && delta < 0) {
+          tracking.totalTurn += Math.abs(delta);
+        }
+      }
+      tracking.lastHdg = hdg;
+
+      const altDev = alt - entry.alt;
+      const spdDev = spd - entry.spd;
+      const bankAbs = Math.abs(bank);
+      const bankDev = bankAbs - 45;
+
+      if (Math.abs(altDev) > Math.abs(tracking.maxAltDev)) tracking.maxAltDev = altDev;
+      if (Math.abs(spdDev) > Math.abs(tracking.maxSpdDev)) tracking.maxSpdDev = spdDev;
+      if (Math.abs(bankDev) > Math.abs(tracking.maxBankDev)) tracking.maxBankDev = bankDev;
+
+      if (Math.abs(altDev) > 100) tracking.busted.alt = true;
+      if (Math.abs(spdDev) > 10) tracking.busted.spd = true;
+      if (bankAbs < 40 || bankAbs > 50) tracking.busted.bank = true;
+
+      updateDeviationUI("alt", altDev, 100, "ft");
+      updateDeviationUI("spd", spdDev, 10, "kt");
+      updateBankUI(bankAbs);
+
+      const progress = Math.min(tracking.totalTurn / 360, 1);
+      const circumference = 263.89;
+      document.getElementById("progressCircle").style.strokeDashoffset = circumference * (1 - progress);
+      document.getElementById("turnDegrees").textContent = Math.round(tracking.totalTurn) + "°";
+
+      if (tracking.totalTurn >= 360) {
+        const hdgErr = Math.abs(normalizeAngle(hdg - entry.hdg));
+        completeManeuver(hdgErr);
+      }
+    }
+
+    function updateDeviationUI(param, dev, limit, unit) {
+      const devEl = document.getElementById(param + "Dev");
+      const fillEl = document.getElementById(param + "Fill");
+
+      const sign = dev >= 0 ? "+" : "";
+      devEl.textContent = sign + Math.round(dev) + " " + unit;
+
+      const pct = Math.min(Math.abs(dev) / limit, 1) * 50;
+      const inTolerance = Math.abs(dev) <= limit;
+
+      devEl.className = "tolerance-value " + (inTolerance ? "pass" : "fail");
+
+      if (dev >= 0) {
+        fillEl.style.left = "50%";
+        fillEl.style.width = pct + "%";
+      } else {
+        fillEl.style.left = (50 - pct) + "%";
+        fillEl.style.width = pct + "%";
+      }
+
+      fillEl.style.background = inTolerance ? "var(--green)" : "var(--red)";
+    }
+
+    function updateBankUI(bankAbs) {
+      const devEl = document.getElementById("bankDev");
+      const fillEl = document.getElementById("bankFill");
+
+      devEl.textContent = Math.round(bankAbs) + "°";
+
+      const dev = bankAbs - 45;
+      const pct = Math.min(Math.abs(dev) / 5, 1) * 50;
+      const inTolerance = bankAbs >= 40 && bankAbs <= 50;
+
+      devEl.className = "tolerance-value " + (inTolerance ? "pass" : "fail");
+
+      if (dev >= 0) {
+        fillEl.style.left = "50%";
+        fillEl.style.width = pct + "%";
+      } else {
+        fillEl.style.left = (50 - pct) + "%";
+        fillEl.style.width = pct + "%";
+      }
+
+      fillEl.style.background = inTolerance ? "var(--green)" : "var(--red)";
+    }
+
+    function completeManeuver(hdgErr) {
+      setStatus("complete", "Complete");
+      updateButton();
+
+      const hdgPass = hdgErr <= 10;
+      const allPass = !tracking.busted.alt && !tracking.busted.spd && !tracking.busted.bank && hdgPass;
+
+      document.getElementById("gradeText").textContent = allPass ? "PASS" : "FAIL";
+      document.getElementById("gradeText").className = "grade " + (allPass ? "pass" : "fail");
+
+      let summary = [];
+      if (tracking.busted.alt) summary.push("altitude exceeded ±100 ft");
+      if (tracking.busted.spd) summary.push("airspeed exceeded ±10 kt");
+      if (tracking.busted.bank) summary.push("bank outside 40-50°");
+      if (!hdgPass) summary.push("rollout heading error > 10°");
+
+      document.getElementById("gradeSummary").textContent = allPass
+        ? "All parameters within ACS standards!"
+        : "Exceeded: " + summary.join(", ");
+
+      const maxAltEl = document.getElementById("maxAltDev");
+      maxAltEl.textContent = (tracking.maxAltDev >= 0 ? "+" : "") + Math.round(tracking.maxAltDev) + " ft";
+      maxAltEl.className = "max " + (Math.abs(tracking.maxAltDev) <= 100 ? "pass" : "fail");
+
+      const maxSpdEl = document.getElementById("maxSpdDev");
+      maxSpdEl.textContent = (tracking.maxSpdDev >= 0 ? "+" : "") + Math.round(tracking.maxSpdDev) + " kt";
+      maxSpdEl.className = "max " + (Math.abs(tracking.maxSpdDev) <= 10 ? "pass" : "fail");
+
+      const maxBankEl = document.getElementById("maxBankDev");
+      maxBankEl.textContent = (tracking.maxBankDev >= 0 ? "+" : "") + Math.round(tracking.maxBankDev) + "° from 45°";
+      maxBankEl.className = "max " + (Math.abs(tracking.maxBankDev) <= 5 ? "pass" : "fail");
+
+      const rolloutEl = document.getElementById("rolloutErr");
+      rolloutEl.textContent = Math.round(hdgErr) + "°";
+      rolloutEl.className = "max " + (hdgErr <= 10 ? "pass" : "fail");
+
+      showPanel("grade");
+    }
+
+    function reset() {
+      entry = null;
+      entryValues.style.display = "none";
+      dirIndicator.style.display = "none";
+      setStatus("ready", "Ready");
+      updateButton();
+      showPanel("waiting");
+
+      document.getElementById("progressCircle").style.strokeDashoffset = 263.89;
+      document.getElementById("turnDegrees").textContent = "0°";
+    }
+
+    startBtn.addEventListener("click", () => {
+      if (state === "ready") {
+      } else if (state === "tracking") {
+        cancelTracking();
+      }
+    });
+
+    resetBtn.addEventListener("click", reset);
+
+    function connect() {
+      setStatus("disconnected", "Connecting...");
+      updateButton();
+
+      ws = new WebSocket(WS_URL);
+
+      ws.onopen = () => {
+        setStatus("ready", "Ready");
+        updateButton();
+      };
+
+      ws.onmessage = (e) => {
+        let data;
+        try { data = JSON.parse(e.data); } catch { return; }
+
+        updateLiveData(data);
+
+        if (state === "ready" && startBtn.dataset.pending === "true") {
+          startBtn.dataset.pending = "false";
+          startTracking(data);
+        }
+
+        if (state === "tracking") {
+          updateTracking(data);
+        }
+      };
+
+      ws.onerror = () => setStatus("disconnected", "Error");
+      ws.onclose = () => {
+        setStatus("disconnected", "Disconnected");
+        updateButton();
+        setTimeout(connect, 2000);
+      };
+    }
+
+    startBtn.addEventListener("click", () => {
+      if (state === "ready") {
+        startBtn.dataset.pending = "true";
+      }
+    });
+
+    connect();
+  </script>
+</body>
+</html>
+

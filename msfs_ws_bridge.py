@@ -57,6 +57,14 @@ async def main():
             pitch_rad = safe_get(aq, "PLANE_PITCH_DEGREES")
             bank_rad  = safe_get(aq, "PLANE_BANK_DEGREES")
 
+            # Rotation rates (rad/s) - critical for maneuver tracking
+            roll_rate = safe_get(aq, "ROTATION_VELOCITY_BODY_X")
+            pitch_rate = safe_get(aq, "ROTATION_VELOCITY_BODY_Y")
+            yaw_rate = safe_get(aq, "ROTATION_VELOCITY_BODY_Z")
+
+            # G-force for maneuver intensity
+            g_force = safe_get(aq, "G_FORCE")
+
             payload = {
                 "ts": asyncio.get_event_loop().time(),
 
@@ -74,6 +82,14 @@ async def main():
                 # UI values: degrees
                 "pitch_deg": rad_to_deg(pitch_rad),
                 "bank_deg": -rad_to_deg(bank_rad) if rad_to_deg(bank_rad) is not None else None,
+
+                # Rotation rates (deg/s) - for maneuver detection
+                "roll_rate": rad_to_deg(roll_rate),
+                "pitch_rate": rad_to_deg(pitch_rate),
+                "yaw_rate": rad_to_deg(yaw_rate),
+
+                # G-force
+                "g_force": g_force,
             }
 
             hdg_deg = rad_to_deg(hdg_true)
