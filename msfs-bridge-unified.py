@@ -62,38 +62,38 @@ def write_config(session_id):
 
 def show_session_id_dialog():
     """Show GUI dialog to get session ID from user"""
-    root = tk.Tk()
-    root.withdraw()  # Hide main window
-    
-    # Create dialog
-    dialog = tk.Toplevel(root)
-    dialog.title("MSFS Bridge - Connect Your Account")
-    dialog.geometry("550x350")
-    dialog.resizable(False, False)
-    
-    # Center the window
-    dialog.update_idletasks()
-    x = (dialog.winfo_screenwidth() // 2) - (550 // 2)
-    y = (dialog.winfo_screenheight() // 2) - (350 // 2)
-    dialog.geometry(f"550x350+{x}+{y}")
-    
-    # Make it modal
-    dialog.transient(root)
-    dialog.grab_set()
+    print("Creating GUI dialog...")
     
     # Result storage
     result = {"session_id": None, "cancelled": False}
+    
+    # Create root window (use it directly, not Toplevel)
+    root = tk.Tk()
+    root.title("MSFS Bridge - Connect Your Account")
+    root.geometry("550x350")
+    root.resizable(False, False)
+    print("Root window created")
+    
+    # Center the window
+    root.update_idletasks()
+    x = (root.winfo_screenwidth() // 2) - (550 // 2)
+    y = (root.winfo_screenheight() // 2) - (350 // 2)
+    root.geometry(f"550x350+{x}+{y}")
+    print("Window centered")
     
     # Prevent closing without result
     def on_close():
         if messagebox.askokcancel("Quit", "Do you want to exit without connecting?"):
             result["cancelled"] = True
             root.quit()
+        else:
+            # Don't close if user cancels
+            pass
     
-    dialog.protocol("WM_DELETE_WINDOW", on_close)
+    root.protocol("WM_DELETE_WINDOW", on_close)
     
     # Title
-    title_frame = tk.Frame(dialog, bg="#6366f1", height=60)
+    title_frame = tk.Frame(root, bg="#6366f1", height=60)
     title_frame.pack(fill=tk.X)
     title_frame.pack_propagate(False)
     
@@ -102,7 +102,7 @@ def show_session_id_dialog():
              bg="#6366f1", fg="white").pack(pady=15)
     
     # Instructions
-    instructions_frame = tk.Frame(dialog, padx=30, pady=20)
+    instructions_frame = tk.Frame(root, padx=30, pady=20)
     instructions_frame.pack(fill=tk.BOTH, expand=True)
     
     tk.Label(instructions_frame, 
@@ -145,7 +145,6 @@ def show_session_id_dialog():
         if write_config(session_id):
             result["session_id"] = session_id
             root.quit()
-            dialog.destroy()
             root.destroy()
         else:
             messagebox.showerror("Error", 
@@ -154,7 +153,6 @@ def show_session_id_dialog():
     def on_cancel():
         result["cancelled"] = True
         root.quit()
-        dialog.destroy()
         root.destroy()
     
     def on_help():
@@ -181,24 +179,24 @@ def show_session_id_dialog():
     # Handle Enter key
     entry.bind("<Return>", lambda e: on_connect())
     
-    # Show the dialog and wait
-    dialog.focus_force()
-    dialog.lift()
+    # Show the window and wait
+    print("Showing window...")
+    root.focus_force()
+    root.lift()
+    root.update()
+    print("Window should be visible now, starting mainloop...")
     
-    # Wait for dialog to close
+    # Wait for window to close
     try:
         root.mainloop()
+        print("Mainloop ended")
     except Exception as e:
         print(f"GUI Error: {e}")
         import traceback
         traceback.print_exc()
         return None
-    finally:
-        try:
-            root.destroy()
-        except:
-            pass
     
+    print(f"Returning result: cancelled={result['cancelled']}, session_id={result['session_id']}")
     return result["session_id"] if not result["cancelled"] else None
 
 async def run_bridge(session_id):
