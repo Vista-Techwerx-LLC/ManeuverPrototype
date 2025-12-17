@@ -287,6 +287,14 @@
           <p>Click any maneuver above. The status should show "Connected" and you'll see live data from your sim!</p>
         </div>
       </div>
+
+      <div class="step">
+        <div class="step-num">📱</div>
+        <div class="step-content">
+          <h4>Mobile Access (Optional)</h4>
+          <p>To view on your phone: Run <code>python start-server.py</code> (or use any web server), then open <code>http://&lt;your-pc-ip&gt;:8000/index.html</code> on your phone. No accounts needed!</p>
+        </div>
+      </div>
     </div>
 
     <div class="status-section">
@@ -295,6 +303,14 @@
         <span class="status-dot disconnected" id="statusDot"></span>
         <span id="statusText">Checking connection...</span>
       </div>
+      <div id="mobileConfig" style="display:none;margin-top:20px;padding:16px;background:rgba(99,102,241,0.1);border-radius:8px;border:1px solid var(--accent);">
+        <p style="margin-bottom:12px;font-size:14px;"><strong>📱 Mobile Access:</strong> Enter your PC's IP address to connect from your phone.</p>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="text" id="pcIPInput" placeholder="192.168.1.100" style="flex:1;padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:monospace;" />
+          <button onclick="savePCIP()" style="padding:8px 16px;background:var(--accent);color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;">Save</button>
+        </div>
+        <p style="margin-top:12px;font-size:12px;color:var(--text-muted);">Find your PC's IP: Open Command Prompt and type <code style="background:rgba(0,0,0,0.3);padding:2px 6px;border-radius:4px;">ipconfig</code>, look for "IPv4 Address"</p>
+      </div>
     </div>
   </div>
 
@@ -302,25 +318,58 @@
     MSFS Maneuver Tracker — Practice makes perfect! ✈️
   </div>
 
+  <script src="ws-connection.js"></script>
   <script>
-    const ws = new WebSocket("ws://127.0.0.1:8765");
     const statusDot = document.getElementById("statusDot");
     const statusText = document.getElementById("statusText");
 
-    ws.onopen = () => {
-      statusDot.className = "status-dot connected";
-      statusText.textContent = "Connected to MSFS Bridge";
-    };
+    function updateStatus(connected, text) {
+      statusDot.className = "status-dot " + (connected ? "connected" : "disconnected");
+      statusText.textContent = text;
+    }
 
-    ws.onerror = () => {
-      statusDot.className = "status-dot disconnected";
-      statusText.textContent = "Not connected — Run MSFS-Bridge.exe";
-    };
+    // Initialize connection
+    if (!MSFSConnection.init()) {
+      // No URL configured - show help for mobile users
+      const savedIP = MSFSConnection.getPCIP();
+      if (!savedIP) {
+        updateStatus(false, "Configure PC IP address — See instructions below");
+      }
+    }
 
-    ws.onclose = () => {
-      statusDot.className = "status-dot disconnected";
-      statusText.textContent = "Not connected — Run MSFS-Bridge.exe";
-    };
+    MSFSConnection.on('open', () => {
+      updateStatus(true, "Connected to MSFS Bridge");
+    });
+
+    MSFSConnection.on('error', () => {
+      updateStatus(false, "Not connected — Run MSFS-Bridge.exe");
+    });
+
+    MSFSConnection.on('close', () => {
+      updateStatus(false, "Not connected — Run MSFS-Bridge.exe");
+    });
+
+    // Show mobile config if needed
+    if (!MSFSConnection.getPCIP() && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      document.getElementById('mobileConfig').style.display = 'block';
+    }
+
+    function savePCIP() {
+      const input = document.getElementById('pcIPInput');
+      const ip = input.value.trim();
+      const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+      if (ipPattern.test(ip)) {
+        MSFSConnection.setPCIP(ip);
+        document.getElementById('mobileConfig').style.display = 'none';
+        MSFSConnection.close();
+        MSFSConnection.connect();
+      } else {
+        alert('Please enter a valid IP address (e.g., 192.168.1.100)');
+      }
+    }
+
+    // Connect
+    MSFSConnection.connect();
   </script>
 </body>
 </html>

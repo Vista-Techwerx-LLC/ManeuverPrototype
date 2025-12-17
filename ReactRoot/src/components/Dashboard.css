@@ -1,0 +1,188 @@
+.dashboard {
+  flex: 1;
+  padding: 40px 24px;
+}
+
+.dashboard-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.dashboard h1 {
+  font-size: 32px;
+  margin-bottom: 8px;
+}
+
+.dashboard-subtitle {
+  color: var(--text-muted);
+  margin-bottom: 32px;
+  font-size: 16px;
+}
+
+.dashboard-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+}
+
+.dashboard-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.dashboard-card h2 {
+  font-size: 20px;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+
+.session-id-box {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.session-id-box code {
+  flex: 1;
+  font-family: 'Consolas', monospace;
+  font-size: 14px;
+  color: var(--accent-bright);
+  word-break: break-all;
+}
+
+.copy-btn {
+  padding: 6px 12px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.copy-btn:hover {
+  background: var(--accent-bright);
+}
+
+.session-hint {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.quick-links {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.quick-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-decoration: none;
+  color: var(--text);
+  transition: all 0.2s;
+}
+
+.quick-link:hover {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
+  transform: translateY(-2px);
+}
+
+.quick-link .icon {
+  font-size: 24px;
+}
+
+.quick-link strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.quick-link p {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+}
+
+.setup-steps {
+  padding-left: 20px;
+  color: var(--text-muted);
+  line-height: 1.8;
+}
+
+.setup-steps li {
+  margin-bottom: 12px;
+}
+
+.setup-steps code {
+  background: rgba(0, 0, 0, 0.3);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'Consolas', monospace;
+  font-size: 13px;
+  color: var(--accent-bright);
+}
+
+.config-example {
+  margin: 12px 0;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.config-example code {
+  flex: 1;
+  min-width: 200px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+  display: block;
+  font-size: 14px;
+}
+
+.download-config-btn {
+  padding: 8px 16px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.download-config-btn:hover {
+  background: var(--accent-bright);
+  transform: translateY(-1px);
+}
+
+.dashboard-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 50vh;
+  color: var(--text-muted);
+}
+

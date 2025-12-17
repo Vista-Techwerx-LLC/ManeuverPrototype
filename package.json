@@ -1,0 +1,24 @@
+{
+  "name": "msfs-bridge-cloud-relay",
+  "version": "1.0.0",
+  "description": "Cloud WebSocket relay server for MSFS Bridge",
+  "main": "cloud-relay-server.js",
+  "scripts": {
+    "start": "node cloud-relay-server.js",
+    "dev": "nodemon cloud-relay-server.js"
+  },
+  "keywords": ["websocket", "msfs", "flight-simulator"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
+
+

@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['msfs_ws_bridge.py'],
+    ['msfs-bridge-unified.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:\\Users\\trist\\AppData\\Local\\Programs\\Python\\Python312\\Lib\\site-packages\\SimConnect\\SimConnect.dll', 'SimConnect')],
+    datas=[('C:\\Python312\\Lib\\site-packages\\SimConnect\\SimConnect.dll', 'SimConnect')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -29,7 +29,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,
+    console=True,  # Set to True to see errors during debugging
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

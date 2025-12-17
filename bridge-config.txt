@@ -1,0 +1,2 @@
+SESSION_ID=user_638d0af0
+# This file stores your session ID
