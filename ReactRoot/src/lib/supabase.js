@@ -1,24 +1,34 @@
 import { createClient } from '@supabase/supabase-js'
 
-// Supabase configuration
-// Get these from your Supabase project settings: https://app.supabase.com
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'YOUR_SUPABASE_URL'
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'YOUR_SUPABASE_ANON_KEY'
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-if (!supabaseUrl || supabaseUrl === 'YOUR_SUPABASE_URL') {
-  console.warn('⚠️ Supabase URL not configured. Set VITE_SUPABASE_URL in .env file')
+if (!supabaseUrl || !supabaseAnonKey) {
+  const errorMsg = 'Supabase environment variables are not configured. Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in GitHub Secrets.'
+  console.error('❌', errorMsg)
+  console.error('VITE_SUPABASE_URL:', supabaseUrl ? '✓ Set' : '✗ Missing')
+  console.error('VITE_SUPABASE_ANON_KEY:', supabaseAnonKey ? '✓ Set' : '✗ Missing')
+  console.error('All env vars:', Object.keys(import.meta.env).filter(k => k.startsWith('VITE_')))
+  
+  // Don't throw - instead create a dummy client that will show errors in UI
+  // This prevents white screen and allows error to be displayed
 }
 
-if (!supabaseAnonKey || supabaseAnonKey === 'YOUR_SUPABASE_ANON_KEY') {
-  console.warn('⚠️ Supabase Anon Key not configured. Set VITE_SUPABASE_ANON_KEY in .env file')
-}
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true
-  }
-})
+// Create Supabase client with fallback for missing config
+export const supabase = (supabaseUrl && supabaseAnonKey) 
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    })
+  : createClient('https://placeholder.supabase.co', 'placeholder-key', {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false
+      }
+    })
 
 

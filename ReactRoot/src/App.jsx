@@ -14,23 +14,102 @@ function App() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    let mounted = true
+    
+    // Check if Supabase is configured
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+    
+    if (!supabaseUrl || !supabaseAnonKey) {
+      console.warn('⚠️ Supabase not configured - app will show error message')
+      if (mounted) {
+        setLoading(false)
+      }
+      return
+    }
+    
     // Check active session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
+    supabase.auth.getSession()
+      .then(({ data: { session }, error }) => {
+        if (error) {
+          console.error('Error getting session:', error)
+        }
+        if (mounted) {
+          setUser(session?.user ?? null)
+          setLoading(false)
+        }
+      })
+      .catch((error) => {
+        console.error('Failed to get session:', error)
+        if (mounted) {
+          setLoading(false)
+        }
+      })
 
     // Listen for auth changes
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      setLoading(false)
+      if (mounted) {
+        setUser(session?.user ?? null)
+        setLoading(false)
+      }
     })
 
-    return () => subscription.unsubscribe()
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [])
 
+  // Check if Supabase is configured
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+  
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column',
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        padding: '40px',
+        fontFamily: 'system-ui',
+        textAlign: 'center',
+        maxWidth: '600px',
+        margin: '0 auto'
+      }}>
+        <h1 style={{ color: '#d32f2f', marginTop: 0 }}>⚠️ Configuration Missing</h1>
+        <p style={{ color: '#666', lineHeight: '1.6' }}>
+          The Supabase environment variables are not configured for this deployment.
+        </p>
+        <div style={{ 
+          background: '#f5f5f5', 
+          padding: '20px', 
+          borderRadius: '8px', 
+          marginTop: '20px',
+          textAlign: 'left',
+          fontSize: '14px'
+        }}>
+          <p style={{ marginTop: 0, fontWeight: '600' }}>To fix this:</p>
+          <ol style={{ marginBottom: 0 }}>
+            <li>Go to your GitHub repository</li>
+            <li>Settings → Secrets and variables → Actions</li>
+            <li>Add these secrets:
+              <ul>
+                <li><code>VITE_SUPABASE_URL</code></li>
+                <li><code>VITE_SUPABASE_ANON_KEY</code></li>
+                <li><code>VITE_CLOUD_WS_URL</code></li>
+              </ul>
+            </li>
+            <li>Re-run the GitHub Actions workflow</li>
+          </ol>
+        </div>
+      </div>
+    )
+  }
+  
   if (loading) {
     return (
       <div style={{ 
@@ -45,6 +124,12 @@ function App() {
   }
 
   const basename = import.meta.env.PROD ? '/ManeuverPrototype' : '/'
+  
+  // Debug: Log the basename being used
+  if (import.meta.env.PROD) {
+    console.log('Using basename:', basename)
+    console.log('Current pathname:', window.location.pathname)
+  }
 
   return (
     <Router basename={basename}>
