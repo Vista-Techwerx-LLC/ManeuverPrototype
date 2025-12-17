@@ -6,7 +6,6 @@ import Dashboard from './components/Dashboard'
 import Telemetry from './components/Telemetry'
 import SteepTurn from './components/SteepTurn'
 import SlowFlight from './components/SlowFlight'
-import NotFound from './components/NotFound'
 import Navbar from './components/Navbar'
 import './App.css'
 
@@ -154,10 +153,6 @@ function App() {
           <Route 
             path="/" 
             element={user ? <Navigate to="/dashboard" /> : <Navigate to="/auth" />} 
-          />
-          <Route 
-            path="*" 
-            element={<NotFound />} 
           />
         </Routes>
       </div>
