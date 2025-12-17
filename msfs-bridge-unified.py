@@ -20,7 +20,7 @@ CLOUD_WS_URL = "wss://host-bridge-production.up.railway.app"
 # Configuration file path
 CONFIG_FILE = "bridge-config.txt"
 
-HZ = 15  # Update frequency
+HZ = 30  # Update frequency (30 Hz = ~33ms updates for smoother telemetry)
 
 def safe_get(aq, var_name: str):
     try:
@@ -60,7 +60,7 @@ def write_config(session_id):
         print(f"Error writing config file: {e}")
         return False
 
-def show_session_id_dialog():
+def show_session_id_dialog(existing_session_id=None):
     """Show GUI dialog to get session ID from user"""
     print("Creating GUI dialog...")
     
@@ -70,15 +70,15 @@ def show_session_id_dialog():
     # Create root window (use it directly, not Toplevel)
     root = tk.Tk()
     root.title("MSFS Bridge - Connect Your Account")
-    root.geometry("550x350")
+    root.geometry("550x380")
     root.resizable(False, False)
     print("Root window created")
     
     # Center the window
     root.update_idletasks()
     x = (root.winfo_screenwidth() // 2) - (550 // 2)
-    y = (root.winfo_screenheight() // 2) - (350 // 2)
-    root.geometry(f"550x350+{x}+{y}")
+    y = (root.winfo_screenheight() // 2) - (380 // 2)
+    root.geometry(f"550x380+{x}+{y}")
     print("Window centered")
     
     # Prevent closing without result
@@ -126,10 +126,24 @@ def show_session_id_dialog():
              font=("Segoe UI", 9, "bold")).pack(anchor=tk.W, pady=(0, 5))
     
     session_var = tk.StringVar()
+    if existing_session_id:
+        session_var.set(existing_session_id)
+        # Show a note that there's an existing session ID
+        note_label = tk.Label(instructions_frame,
+                             text="⚠️ Found existing Session ID. You can change it below.",
+                             font=("Segoe UI", 8),
+                             fg="#d29922",
+                             justify=tk.LEFT)
+        note_label.pack(anchor=tk.W, pady=(0, 5))
+    
     entry = tk.Entry(instructions_frame, textvariable=session_var, 
                     font=("Consolas", 11), width=35)
     entry.pack(fill=tk.X, pady=(0, 15))
     entry.focus()
+    # Select all text if there's an existing session ID so user can easily replace it
+    if existing_session_id:
+        entry.select_range(0, tk.END)
+        entry.select_range(0, tk.END)
     
     # Buttons
     button_frame = tk.Frame(instructions_frame)
@@ -294,18 +308,16 @@ async def run_bridge(session_id):
             await asyncio.sleep(reconnect_delay)
 
 if __name__ == "__main__":
-    # Check for existing session ID
-    session_id = read_config()
+    # Always show dialog, but pre-fill with existing session ID if found
+    existing_session_id = read_config()
     
-    # If no session ID, show dialog
+    print("Opening connection dialog...")
+    session_id = show_session_id_dialog(existing_session_id)
+    
     if not session_id:
-        print("Opening connection dialog...")
-        session_id = show_session_id_dialog()
-        
-        if not session_id:
-            print("No session ID provided. Exiting.")
-            input("\nPress Enter to exit...")
-            exit(0)
+        print("No session ID provided. Exiting.")
+        input("\nPress Enter to exit...")
+        exit(0)
     
     # Run the bridge
     try:

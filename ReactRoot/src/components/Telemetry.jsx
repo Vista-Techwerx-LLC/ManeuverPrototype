@@ -8,13 +8,18 @@ export default function Telemetry({ user }) {
 
   useEffect(() => {
     if (data && worldRef.current) {
-      const pitch = data.pitch_deg || 0
-      const bank = data.bank_deg || 0
-      const pitchPx = -pitch * 3
-      const bankDeg = -bank
+      // Use requestAnimationFrame for smooth animations
+      requestAnimationFrame(() => {
+        if (worldRef.current) {
+          const pitch = data.pitch_deg || 0
+          const bank = data.bank_deg || 0
+          const pitchPx = -pitch * 3
+          const bankDeg = -bank
 
-      worldRef.current.style.transform = 
-        `translate(-50%, -50%) rotate(${bankDeg}deg) translateY(${pitchPx}px)`
+          worldRef.current.style.transform = 
+            `translate(-50%, -50%) rotate(${bankDeg}deg) translateY(${pitchPx}px)`
+        }
+      })
     }
   }, [data])
 

@@ -6,9 +6,13 @@
   --text-muted: #8888a0;
   --accent: #6366f1;
   --accent-bright: #818cf8;
-  --green: #22c55e;
+  --green: #238636;
+  --green-bright: #3fb950;
   --red: #da3633;
+  --red-bright: #f85149;
   --yellow: #d29922;
+  --blue: #58a6ff;
+  --purple: #a371f7;
 }
 
 * {

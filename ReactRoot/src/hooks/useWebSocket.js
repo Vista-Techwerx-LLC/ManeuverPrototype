@@ -48,11 +48,7 @@ export function useWebSocket(userId) {
     }
 
     const wsUrl = `${CLOUD_WS_URL}?role=client&sessionId=${sessionId}`
-    console.log('WebSocket: Connecting...', {
-      url: wsUrl,
-      sessionId,
-      cloudWsUrl: CLOUD_WS_URL
-    })
+    console.log('WebSocket: Connecting to', CLOUD_WS_URL, 'session:', sessionId)
 
     const connect = () => {
       try {
@@ -78,10 +74,8 @@ export function useWebSocket(userId) {
             
             // Handle connection status messages
             if (message.type === 'connected') {
-              console.log('Session confirmed:', message.sessionId)
-              console.log('Has bridge:', message.hasBridge)
+              console.log('Session confirmed:', message.sessionId, 'Has bridge:', message.hasBridge)
               if (message.lastData) {
-                console.log('Received last data on connect:', message.lastData)
                 setData(message.lastData)
               }
               return
@@ -93,8 +87,7 @@ export function useWebSocket(userId) {
               return
             }
 
-            // Handle telemetry data
-            console.log('Received telemetry data:', message)
+            // Handle telemetry data (skip logging for performance)
             setData(message)
           } catch (error) {
             console.error('Error parsing WebSocket message:', error)
