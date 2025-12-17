@@ -73,12 +73,13 @@ async def main():
 
                 # UI values: degrees
                 "pitch_deg": rad_to_deg(pitch_rad),
-                "bank_deg": rad_to_deg(bank_rad),
+                "bank_deg": -rad_to_deg(bank_rad) if rad_to_deg(bank_rad) is not None else None,
             }
 
-            # Heading: if you see tiny numbers here too, it may be radians; convert in your UI or here.
-            # Most setups return heading in degrees already.
-            payload["hdg_true"] = hdg_true
+            hdg_deg = rad_to_deg(hdg_true)
+            if hdg_deg is not None:
+                hdg_deg = hdg_deg % 360
+            payload["hdg_true"] = hdg_deg
 
             if clients:
                 msg = json.dumps(payload)

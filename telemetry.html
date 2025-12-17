@@ -288,7 +288,7 @@
         // Update readouts
         pitchEl.textContent = fmt(pitch, 1);
         bankEl.textContent = fmt(bank, 1);
-        hdgEl.textContent = fmt(data.hdg_true_deg ?? data.heading_deg ?? data.hdg_deg, 0);
+        hdgEl.textContent = fmt(data.hdg_true, 0);
         iasEl.textContent = fmt(data.ias_kt, 0);
         altEl.textContent = fmt(data.alt_ft, 0);
         vsEl.textContent = fmt(data.vs_fpm, 0);
