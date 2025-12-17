@@ -5,6 +5,7 @@ import Auth from './components/Auth'
 import Dashboard from './components/Dashboard'
 import Telemetry from './components/Telemetry'
 import SteepTurn from './components/SteepTurn'
+import SlowFlight from './components/SlowFlight'
 import Navbar from './components/Navbar'
 import './App.css'
 
@@ -63,6 +64,10 @@ function App() {
           <Route 
             path="/steep-turn" 
             element={user ? <SteepTurn user={user} /> : <Navigate to="/auth" />} 
+          />
+          <Route 
+            path="/slow-flight" 
+            element={user ? <SlowFlight user={user} /> : <Navigate to="/auth" />} 
           />
           <Route 
             path="/" 

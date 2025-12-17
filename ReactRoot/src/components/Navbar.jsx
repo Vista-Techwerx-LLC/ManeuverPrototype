@@ -37,6 +37,12 @@ export default function Navbar({ user }) {
           >
             Steep Turn
           </Link>
+          <Link 
+            to="/slow-flight" 
+            className={isActive('/slow-flight') ? 'active' : ''}
+          >
+            Slow Flight
+          </Link>
         </div>
 
         <div className="navbar-user">

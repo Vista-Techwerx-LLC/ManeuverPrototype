@@ -95,6 +95,13 @@ export default function Dashboard({ user }) {
                   <p>Practice steep turns</p>
                 </div>
               </Link>
+              <Link to="/slow-flight" className="quick-link">
+                <span className="icon">🐌</span>
+                <div>
+                  <strong>Slow Flight Tracker</strong>
+                  <p>Practice slow flight</p>
+                </div>
+              </Link>
             </div>
           </div>
 
