@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { supabase } from '../lib/supabase'
+import AutoStart from './AutoStart'
+import { SKILL_LEVELS, checkSteepTurnInRange } from '../utils/autoStartTolerances'
 import './SteepTurn.css'
 
 function normalizeAngle(angle) {
@@ -54,6 +56,11 @@ export default function SteepTurn({ user }) {
     }
   })
   const [pendingStart, setPendingStart] = useState(false)
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false)
+  const [autoStartSkillLevel, setAutoStartSkillLevel] = useState(SKILL_LEVELS.BEGINNER)
+  const [autoStartStatus, setAutoStartStatus] = useState(null)
+  const autoStartInRangeStartTime = useRef(null)
+  const autoStartPendingTracking = useRef(false)
   const progressCircleRef = useRef(null)
 
   // Update state based on connection
@@ -64,6 +71,117 @@ export default function SteepTurn({ user }) {
       setState('disconnected')
     }
   }, [connected, state])
+
+  // Auto-start monitoring
+  useEffect(() => {
+    if (!autoStartEnabled || !data || !connected) {
+      if (autoStartPendingTracking.current && state === 'tracking') {
+        setEntry(null)
+        setState('ready')
+        setTracking({
+          turnDirection: null,
+          totalTurn: 0,
+          lastHdg: null,
+          maxAltDev: 0,
+          maxSpdDev: 0,
+          maxBankDev: 0,
+          busted: { alt: false, spd: false, bank: false },
+          samples: {
+            bank: [],
+            alt: [],
+            spd: []
+          }
+        })
+      }
+      autoStartInRangeStartTime.current = null
+      autoStartPendingTracking.current = false
+      setAutoStartStatus(null)
+      return
+    }
+
+    if (state !== 'ready' && state !== 'tracking') {
+      return
+    }
+
+    if (state === 'tracking' && !autoStartPendingTracking.current) {
+      if (!autoStartStatus || autoStartStatus.type !== 'ready') {
+        setAutoStartStatus({ type: 'ready', message: 'Auto-started tracking!' })
+      }
+      return
+    }
+
+    const inRange = checkSteepTurnInRange(data, autoStartSkillLevel)
+
+    if (inRange) {
+      if (autoStartInRangeStartTime.current === null) {
+        autoStartInRangeStartTime.current = Date.now()
+        autoStartPendingTracking.current = true
+        
+        if (state === 'ready') {
+          const newEntry = {
+            hdg: data.hdg_true,
+            alt: data.alt_ft,
+            spd: data.ias_kt
+          }
+          setEntry(newEntry)
+          setTracking({
+            turnDirection: null,
+            totalTurn: 0,
+            lastHdg: newEntry.hdg,
+            maxAltDev: 0,
+            maxSpdDev: 0,
+            maxBankDev: 0,
+            busted: { alt: false, spd: false, bank: false },
+            samples: {
+              bank: [],
+              alt: [],
+              spd: []
+            }
+          })
+          setState('tracking')
+        }
+        
+        setAutoStartStatus({ type: 'monitoring', message: 'Monitoring...' })
+      } else {
+        const timeInRange = (Date.now() - autoStartInRangeStartTime.current) / 1000
+        const remainingTime = Math.max(0, 2 - timeInRange)
+        
+        if (remainingTime > 0) {
+          setAutoStartStatus({ 
+            type: 'countdown', 
+            message: `Confirming in ${remainingTime.toFixed(1)}s...` 
+          })
+        } else {
+          setAutoStartStatus({ type: 'ready', message: 'Auto-started tracking!' })
+          autoStartInRangeStartTime.current = null
+          autoStartPendingTracking.current = false
+        }
+      }
+    } else {
+      if (autoStartPendingTracking.current && state === 'tracking') {
+        setEntry(null)
+        setState('ready')
+        setTracking({
+          turnDirection: null,
+          totalTurn: 0,
+          lastHdg: null,
+          maxAltDev: 0,
+          maxSpdDev: 0,
+          maxBankDev: 0,
+          busted: { alt: false, spd: false, bank: false },
+          samples: {
+            bank: [],
+            alt: [],
+            spd: []
+          }
+        })
+        autoStartPendingTracking.current = false
+      }
+      autoStartInRangeStartTime.current = null
+      const bankAbs = Math.abs(data.bank_deg || 0)
+      setAutoStartStatus({ type: 'monitoring', message: `Bank: ${Math.round(bankAbs)}° (target: 45°)` })
+    }
+  }, [autoStartEnabled, state, data, connected, autoStartSkillLevel])
 
   // Handle start tracking when data arrives and pending
   useEffect(() => {
@@ -324,6 +442,14 @@ export default function SteepTurn({ user }) {
               >
                 {state === 'tracking' ? 'Cancel' : 'Start Tracking'}
               </button>
+
+              <AutoStart
+                enabled={autoStartEnabled}
+                skillLevel={autoStartSkillLevel}
+                onToggle={setAutoStartEnabled}
+                onSkillLevelChange={setAutoStartSkillLevel}
+                status={autoStartStatus}
+              />
 
               {entry && (
                 <>

@@ -1,5 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import AutoStart from './AutoStart'
+import { SKILL_LEVELS, checkSlowFlightInRange } from '../utils/autoStartTolerances'
 import './SlowFlight.css'
 
 function normalizeAngle(angle) {
@@ -51,6 +53,13 @@ export default function SlowFlight({ user }) {
     }
   })
   const [pendingStart, setPendingStart] = useState(false)
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false)
+  const [autoStartSkillLevel, setAutoStartSkillLevel] = useState(SKILL_LEVELS.BEGINNER)
+  const [autoStartStatus, setAutoStartStatus] = useState(null)
+  const autoStartInRangeStartTime = useRef(null)
+  const autoStartReferenceEntry = useRef(null)
+  const autoStartBaselineEstablishedTime = useRef(null)
+  const autoStartOutOfRangeStartTime = useRef(null)
 
   useEffect(() => {
     if (connected && state === 'disconnected') {
@@ -59,6 +68,80 @@ export default function SlowFlight({ user }) {
       setState('disconnected')
     }
   }, [connected, state])
+
+  useEffect(() => {
+    if (!autoStartEnabled || state !== 'ready' || !data || !connected) {
+      autoStartInRangeStartTime.current = null
+      autoStartReferenceEntry.current = null
+      autoStartBaselineEstablishedTime.current = null
+      autoStartOutOfRangeStartTime.current = null
+      setAutoStartStatus(null)
+      return
+    }
+
+    if (!autoStartReferenceEntry.current) {
+      autoStartReferenceEntry.current = {
+        hdg: data.hdg_true,
+        alt: data.alt_ft,
+        spd: data.ias_kt
+      }
+      autoStartBaselineEstablishedTime.current = Date.now()
+      autoStartOutOfRangeStartTime.current = null
+      setAutoStartStatus({ type: 'monitoring', message: 'Establishing baseline...' })
+      return
+    }
+
+    const baselineAge = (Date.now() - autoStartBaselineEstablishedTime.current) / 1000
+    if (baselineAge < 0.5) {
+      setAutoStartStatus({ type: 'monitoring', message: 'Establishing baseline...' })
+      return
+    }
+
+    const inRange = checkSlowFlightInRange(data, autoStartReferenceEntry.current, autoStartSkillLevel)
+
+    if (inRange) {
+      autoStartOutOfRangeStartTime.current = null
+      
+      if (autoStartInRangeStartTime.current === null) {
+        autoStartInRangeStartTime.current = Date.now()
+        setAutoStartStatus({ type: 'monitoring', message: 'Monitoring...' })
+      } else {
+        const timeInRange = (Date.now() - autoStartInRangeStartTime.current) / 1000
+        const remainingTime = Math.max(0, 2 - timeInRange)
+        
+        if (remainingTime > 0) {
+          setAutoStartStatus({ 
+            type: 'countdown', 
+            message: `Starting in ${remainingTime.toFixed(1)}s...` 
+          })
+        } else {
+          setAutoStartStatus({ type: 'ready', message: 'Starting tracking...' })
+          setPendingStart(true)
+          autoStartInRangeStartTime.current = null
+          autoStartReferenceEntry.current = null
+          autoStartBaselineEstablishedTime.current = null
+          autoStartOutOfRangeStartTime.current = null
+        }
+      }
+    } else {
+      autoStartInRangeStartTime.current = null
+      
+      if (autoStartOutOfRangeStartTime.current === null) {
+        autoStartOutOfRangeStartTime.current = Date.now()
+      }
+      
+      const timeOutOfRange = (Date.now() - autoStartOutOfRangeStartTime.current) / 1000
+      
+      if (timeOutOfRange > 2) {
+        autoStartReferenceEntry.current = null
+        autoStartBaselineEstablishedTime.current = null
+        autoStartOutOfRangeStartTime.current = null
+        setAutoStartStatus({ type: 'monitoring', message: 'Waiting for stable flight...' })
+      } else {
+        setAutoStartStatus({ type: 'monitoring', message: 'Waiting for stable flight...' })
+      }
+    }
+  }, [autoStartEnabled, state, data, connected, autoStartSkillLevel])
 
   useEffect(() => {
     if (data && state === 'ready' && pendingStart) {
@@ -309,6 +392,14 @@ export default function SlowFlight({ user }) {
               >
                 {state === 'tracking' ? 'Cancel' : 'Start Tracking'}
               </button>
+
+              <AutoStart
+                enabled={autoStartEnabled}
+                skillLevel={autoStartSkillLevel}
+                onToggle={setAutoStartEnabled}
+                onSkillLevelChange={setAutoStartSkillLevel}
+                status={autoStartStatus}
+              />
 
               {state === 'tracking' && (
                 <button
