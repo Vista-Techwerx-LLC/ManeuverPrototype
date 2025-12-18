@@ -46,6 +46,16 @@ jobs:
         working-directory: ReactRoot
         run: cp dist/index.html dist/404.html
 
+      - name: Verify 404.html was created
+        working-directory: ReactRoot
+        run: |
+          if [ ! -f dist/404.html ]; then
+            echo "ERROR: 404.html was not created!"
+            exit 1
+          fi
+          echo "✓ 404.html created successfully"
+          ls -la dist/404.html
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 

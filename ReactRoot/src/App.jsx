@@ -154,6 +154,10 @@ function App() {
             path="/" 
             element={user ? <Navigate to="/dashboard" /> : <Navigate to="/auth" />} 
           />
+          <Route 
+            path="*" 
+            element={user ? <Navigate to="/dashboard" replace /> : <Navigate to="/auth" replace />} 
+          />
         </Routes>
       </div>
     </Router>
