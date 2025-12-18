@@ -42,6 +42,10 @@ jobs:
           VITE_CLOUD_WS_URL: ${{ secrets.VITE_CLOUD_WS_URL }}
         run: npm run build
 
+      - name: Copy index.html to 404.html for SPA routing
+        working-directory: ReactRoot
+        run: cp dist/index.html dist/404.html
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
