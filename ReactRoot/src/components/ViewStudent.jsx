@@ -13,21 +13,60 @@ export default function ViewStudent({ user }) {
   const [hasAccess, setHasAccess] = useState(false)
 
   useEffect(() => {
-    checkAccess()
+    if (studentId && user.id) {
+      checkAccess()
+    }
   }, [user.id, studentId])
 
   async function checkAccess() {
+    if (!studentId || !user.id) {
+      console.log('Missing studentId or userId:', { studentId, userId: user.id })
+      setHasAccess(false)
+      setLoading(false)
+      return
+    }
+
+    // If viewing your own progress, skip access check
+    if (studentId === user.id) {
+      console.log('Viewing own progress - access granted')
+      setHasAccess(true)
+      loadStudentData()
+      return
+    }
+
     try {
-      // Check if user has permission to view this student
-      const { data, error } = await supabase
+      // Check if users are connected (bidirectional - either direction works)
+      // Check both directions separately for better reliability
+      const { data: asInstructor, error: e1 } = await supabase
         .from('instructor_relationships')
         .select('*')
         .eq('instructor_id', user.id)
         .eq('student_id', studentId)
         .eq('status', 'accepted')
-        .single()
+        .maybeSingle()
 
-      if (error || !data) {
+      const { data: asStudent, error: e2 } = await supabase
+        .from('instructor_relationships')
+        .select('*')
+        .eq('instructor_id', studentId)
+        .eq('student_id', user.id)
+        .eq('status', 'accepted')
+        .maybeSingle()
+
+      const hasAccess = (asInstructor && !e1) || (asStudent && !e2)
+
+      console.log('Access check:', { 
+        userId: user.id, 
+        studentId, 
+        asInstructor, 
+        asStudent,
+        e1, 
+        e2,
+        hasAccess
+      })
+
+      if (!hasAccess) {
+        console.log('No accepted relationship found')
         setHasAccess(false)
         setLoading(false)
         return
@@ -37,6 +76,7 @@ export default function ViewStudent({ user }) {
       loadStudentData()
     } catch (error) {
       console.error('Error checking access:', error)
+      setHasAccess(false)
       setLoading(false)
     }
   }
@@ -111,9 +151,12 @@ export default function ViewStudent({ user }) {
       <div className="view-student-page">
         <div className="view-student-container">
           <h1>Access Denied</h1>
-          <p>You don't have permission to view this student's progress.</p>
+          <p>You don't have permission to view this user's progress.</p>
+          <p style={{ color: 'var(--text-muted)', fontSize: '14px', marginTop: '8px' }}>
+            Make sure you're both connected and the connection has been accepted.
+          </p>
           <button onClick={() => navigate('/friends')} className="back-btn">
-            Back to Friends
+            Back to Connections
           </button>
         </div>
       </div>
@@ -124,11 +167,17 @@ export default function ViewStudent({ user }) {
     <div className="view-student-page">
       <div className="view-student-container">
         <div className="student-header">
-          <button onClick={() => navigate('/friends')} className="back-btn">
-            ← Back
-          </button>
+          {studentId === user.id ? (
+            <button onClick={() => navigate('/dashboard')} className="back-btn">
+              ← Back to Dashboard
+            </button>
+          ) : (
+            <button onClick={() => navigate('/friends')} className="back-btn">
+              ← Back to Connections
+            </button>
+          )}
           <div>
-            <h1>Student Progress</h1>
+            <h1>{studentId === user.id ? 'My Progress & Logs' : 'Progress & Logs'}</h1>
             <p className="student-email">{student?.email || 'Unknown'}</p>
           </div>
         </div>

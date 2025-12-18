@@ -52,7 +52,7 @@ export default function Friends({ user }) {
       // Create a map for quick lookup
       const profileMap = new Map()
       profiles?.forEach(profile => {
-        profileMap.set(profile.user_id, profile)
+        profileMap.set(profile.user_id, { ...profile, id: profile.user_id })
       })
 
       const accepted = []
@@ -61,7 +61,8 @@ export default function Friends({ user }) {
 
       // Process as student (instructors viewing you)
       asStudent?.forEach(rel => {
-        const otherUser = profileMap.get(rel.instructor_id) || { id: rel.instructor_id, email: 'Unknown' }
+        const profile = profileMap.get(rel.instructor_id)
+        const otherUser = profile || { id: rel.instructor_id, user_id: rel.instructor_id, email: 'Unknown' }
         
         if (rel.status === 'accepted') {
           accepted.push({
@@ -89,7 +90,8 @@ export default function Friends({ user }) {
 
       // Process as instructor (students you can view)
       asInstructor?.forEach(rel => {
-        const otherUser = profileMap.get(rel.student_id) || { id: rel.student_id, email: 'Unknown' }
+        const profile = profileMap.get(rel.student_id)
+        const otherUser = profile || { id: rel.student_id, user_id: rel.student_id, email: 'Unknown' }
         
         if (rel.status === 'accepted') {
           accepted.push({
@@ -171,7 +173,8 @@ export default function Friends({ user }) {
         return
       }
 
-      // Create relationship (user invites other as instructor)
+      // Create relationship (bidirectional connection)
+      // We'll use student_id/instructor_id just as user1/user2 - both can view each other once connected
       const { error } = await supabase
         .from('instructor_relationships')
         .insert({
@@ -265,11 +268,11 @@ export default function Friends({ user }) {
   return (
     <div className="friends-page">
       <div className="friends-container">
-        <h1>Friends & Instructors</h1>
-        <p className="subtitle">Share your progress with instructors or friends</p>
+        <h1>Connections</h1>
+        <p className="subtitle">Connect with friends to view each other's progress and logs</p>
 
         <div className="invite-section">
-          <h2>Invite Instructor/Friend</h2>
+          <h2>Connect with Friend</h2>
           <div className="invite-form">
             <input
               type="email"
@@ -283,7 +286,7 @@ export default function Friends({ user }) {
             </button>
           </div>
           <p className="invite-hint">
-            They'll be able to view your maneuver history and progress charts
+            Once connected, you'll both be able to view each other's progress and logs
           </p>
         </div>
 
@@ -319,19 +322,15 @@ export default function Friends({ user }) {
                 <div key={friend.relationshipId} className="friend-card">
                   <div className="friend-info">
                     <div className="friend-email">{friend.otherUser?.email || 'Unknown'}</div>
-                    <div className="friend-role">
-                      {friend.role === 'instructor' ? '👨‍🏫 Instructor' : '👨‍🎓 Student'}
-                    </div>
+                    <div className="friend-role">Connected</div>
                   </div>
                   <div className="friend-actions">
-                    {friend.role === 'student' && (
-                      <Link
-                        to={`/view-student/${friend.otherUser?.id}`}
-                        className="view-btn"
-                      >
-                        View Progress
-                      </Link>
-                    )}
+                    <Link
+                      to={`/view-student/${friend.otherUser?.id || friend.otherUser?.user_id}`}
+                      className="view-btn"
+                    >
+                      View Progress
+                    </Link>
                     <button
                       className="remove-btn"
                       onClick={() => removeFriend(friend.relationshipId)}
@@ -356,9 +355,7 @@ export default function Friends({ user }) {
                 <div key={invite.relationshipId} className="friend-card">
                   <div className="friend-info">
                     <div className="friend-email">{invite.otherUser?.email || 'Unknown'}</div>
-                    <div className="friend-role">
-                      {invite.role === 'instructor' ? '👨‍🏫 Wants to view your progress' : '👨‍🎓 Student invite'}
-                    </div>
+                    <div className="friend-role">Wants to connect</div>
                   </div>
                   <div className="friend-actions">
                     <button
