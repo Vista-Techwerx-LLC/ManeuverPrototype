@@ -42,19 +42,26 @@ jobs:
           VITE_CLOUD_WS_URL: ${{ secrets.VITE_CLOUD_WS_URL }}
         run: npm run build
 
-      - name: Copy index.html to 404.html for SPA routing
+      - name: Create 404.html for SPA routing
         working-directory: ReactRoot
-        run: cp dist/index.html dist/404.html
+        run: |
+          if [ -f dist/index.html ]; then
+            cp dist/index.html dist/404.html
+            echo "✓ 404.html created from index.html"
+          else
+            echo "ERROR: index.html not found in dist/"
+            exit 1
+          fi
 
-      - name: Verify 404.html was created
+      - name: Verify 404.html exists
         working-directory: ReactRoot
         run: |
           if [ ! -f dist/404.html ]; then
             echo "ERROR: 404.html was not created!"
             exit 1
           fi
-          echo "✓ 404.html created successfully"
-          ls -la dist/404.html
+          echo "✓ 404.html verified"
+          echo "File size: $(wc -c < dist/404.html) bytes"
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
