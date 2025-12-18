@@ -49,6 +49,12 @@ export default function Navbar({ user }) {
           >
             History
           </Link>
+          <Link 
+            to="/friends" 
+            className={isActive('/friends') ? 'active' : ''}
+          >
+            Friends
+          </Link>
         </div>
 
         <div className="navbar-user">

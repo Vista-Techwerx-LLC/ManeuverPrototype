@@ -55,3 +55,22 @@ CREATE INDEX IF NOT EXISTS idx_maneuver_results_created_at ON maneuver_results(c
 -- Disable Row Level Security (for simpler setup - no security restrictions)
 ALTER TABLE maneuver_results DISABLE ROW LEVEL SECURITY;
 
+-- Create table for instructor/student relationships
+CREATE TABLE IF NOT EXISTS instructor_relationships (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  student_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  instructor_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'accepted', 'declined'
+  invited_by UUID REFERENCES auth.users(id) NOT NULL, -- who sent the invite
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(student_id, instructor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_instructor_relationships_student ON instructor_relationships(student_id);
+CREATE INDEX IF NOT EXISTS idx_instructor_relationships_instructor ON instructor_relationships(instructor_id);
+CREATE INDEX IF NOT EXISTS idx_instructor_relationships_status ON instructor_relationships(status);
+
+-- Disable Row Level Security
+ALTER TABLE instructor_relationships DISABLE ROW LEVEL SECURITY;
+
