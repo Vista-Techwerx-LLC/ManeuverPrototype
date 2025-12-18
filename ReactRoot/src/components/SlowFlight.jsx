@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import AutoStart from './AutoStart'
-import { SKILL_LEVELS, checkSlowFlightInRange } from '../utils/autoStartTolerances'
+import { SKILL_LEVELS, MANEUVER_TYPES, checkSlowFlightInRange } from '../utils/autoStartTolerances'
 import './SlowFlight.css'
 
 function normalizeAngle(angle) {
@@ -399,6 +399,7 @@ export default function SlowFlight({ user }) {
                 onToggle={setAutoStartEnabled}
                 onSkillLevelChange={setAutoStartSkillLevel}
                 status={autoStartStatus}
+                maneuverType={MANEUVER_TYPES.SLOW_FLIGHT}
               />
 
               {state === 'tracking' && (

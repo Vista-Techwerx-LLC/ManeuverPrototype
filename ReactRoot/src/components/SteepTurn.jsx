@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { supabase } from '../lib/supabase'
 import AutoStart from './AutoStart'
-import { SKILL_LEVELS, checkSteepTurnInRange } from '../utils/autoStartTolerances'
+import { SKILL_LEVELS, MANEUVER_TYPES, checkSteepTurnInRange } from '../utils/autoStartTolerances'
 import './SteepTurn.css'
 
 function normalizeAngle(angle) {
@@ -110,14 +110,56 @@ export default function SteepTurn({ user }) {
       return
     }
 
-    const inRange = checkSteepTurnInRange(data, autoStartSkillLevel)
-
-    if (inRange) {
-      if (autoStartInRangeStartTime.current === null) {
-        autoStartInRangeStartTime.current = Date.now()
-        autoStartPendingTracking.current = true
+    if (state === 'tracking' && autoStartPendingTracking.current) {
+      const inRange = checkSteepTurnInRange(data, autoStartSkillLevel)
+      
+      if (inRange) {
+        const timeInRange = (Date.now() - autoStartInRangeStartTime.current) / 1000
+        const remainingTime = Math.max(0, 2 - timeInRange)
         
-        if (state === 'ready') {
+        if (remainingTime > 0) {
+          setAutoStartStatus({ 
+            type: 'countdown', 
+            message: `Confirming in ${remainingTime.toFixed(1)}s...` 
+          })
+        } else {
+          setAutoStartStatus({ type: 'ready', message: 'Auto-started tracking!' })
+          autoStartInRangeStartTime.current = null
+          autoStartPendingTracking.current = false
+        }
+      } else {
+        setEntry(null)
+        setState('ready')
+        setTracking({
+          turnDirection: null,
+          totalTurn: 0,
+          lastHdg: null,
+          maxAltDev: 0,
+          maxSpdDev: 0,
+          maxBankDev: 0,
+          busted: { alt: false, spd: false, bank: false },
+          samples: {
+            bank: [],
+            alt: [],
+            spd: []
+          }
+        })
+        autoStartPendingTracking.current = false
+        autoStartInRangeStartTime.current = null
+        const bankAbs = Math.abs(data.bank_deg || 0)
+        setAutoStartStatus({ type: 'monitoring', message: `Bank: ${Math.round(bankAbs)}° (target: 45°)` })
+      }
+      return
+    }
+
+    if (state === 'ready') {
+      const inRange = checkSteepTurnInRange(data, autoStartSkillLevel)
+
+      if (inRange) {
+        if (autoStartInRangeStartTime.current === null) {
+          autoStartInRangeStartTime.current = Date.now()
+          autoStartPendingTracking.current = true
+          
           const newEntry = {
             hdg: data.hdg_true,
             alt: data.alt_ft,
@@ -139,47 +181,13 @@ export default function SteepTurn({ user }) {
             }
           })
           setState('tracking')
+          setAutoStartStatus({ type: 'monitoring', message: 'Monitoring...' })
         }
-        
-        setAutoStartStatus({ type: 'monitoring', message: 'Monitoring...' })
       } else {
-        const timeInRange = (Date.now() - autoStartInRangeStartTime.current) / 1000
-        const remainingTime = Math.max(0, 2 - timeInRange)
-        
-        if (remainingTime > 0) {
-          setAutoStartStatus({ 
-            type: 'countdown', 
-            message: `Confirming in ${remainingTime.toFixed(1)}s...` 
-          })
-        } else {
-          setAutoStartStatus({ type: 'ready', message: 'Auto-started tracking!' })
-          autoStartInRangeStartTime.current = null
-          autoStartPendingTracking.current = false
-        }
+        autoStartInRangeStartTime.current = null
+        const bankAbs = Math.abs(data.bank_deg || 0)
+        setAutoStartStatus({ type: 'monitoring', message: `Bank: ${Math.round(bankAbs)}° (target: 45°)` })
       }
-    } else {
-      if (autoStartPendingTracking.current && state === 'tracking') {
-        setEntry(null)
-        setState('ready')
-        setTracking({
-          turnDirection: null,
-          totalTurn: 0,
-          lastHdg: null,
-          maxAltDev: 0,
-          maxSpdDev: 0,
-          maxBankDev: 0,
-          busted: { alt: false, spd: false, bank: false },
-          samples: {
-            bank: [],
-            alt: [],
-            spd: []
-          }
-        })
-        autoStartPendingTracking.current = false
-      }
-      autoStartInRangeStartTime.current = null
-      const bankAbs = Math.abs(data.bank_deg || 0)
-      setAutoStartStatus({ type: 'monitoring', message: `Bank: ${Math.round(bankAbs)}° (target: 45°)` })
     }
   }, [autoStartEnabled, state, data, connected, autoStartSkillLevel])
 
@@ -449,6 +457,7 @@ export default function SteepTurn({ user }) {
                 onToggle={setAutoStartEnabled}
                 onSkillLevelChange={setAutoStartSkillLevel}
                 status={autoStartStatus}
+                maneuverType={MANEUVER_TYPES.STEEP_TURN}
               />
 
               {entry && (
