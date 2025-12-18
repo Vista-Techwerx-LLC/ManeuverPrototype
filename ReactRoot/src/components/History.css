@@ -1,0 +1,264 @@
+.history-page {
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.history-container {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.history-page h1 {
+  margin: 0 0 8px 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.history-page .subtitle {
+  color: var(--text-muted);
+  margin-bottom: 24px;
+  font-size: 14px;
+}
+
+.stats-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+@media (max-width: 800px) {
+  .stats-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 36px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+  margin-bottom: 8px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.filter-btn {
+  padding: 10px 20px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.filter-btn:hover {
+  background: #1a1a24;
+  border-color: var(--blue);
+}
+
+.filter-btn.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+}
+
+.empty-state {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.maneuver-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.maneuver-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.15s;
+}
+
+.maneuver-card.pass {
+  border-left: 4px solid var(--green-bright);
+}
+
+.maneuver-card.fail {
+  border-left: 4px solid var(--red-bright);
+}
+
+.maneuver-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.maneuver-header:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.maneuver-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.maneuver-type {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.maneuver-date {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.maneuver-grade-badge {
+  display: flex;
+  align-items: center;
+}
+
+.grade-text {
+  font-size: 18px;
+  font-weight: 700;
+  font-family: 'Consolas', monospace;
+  padding: 8px 16px;
+  border-radius: 6px;
+}
+
+.grade-text.pass {
+  color: var(--green-bright);
+  background: rgba(63, 185, 80, 0.1);
+}
+
+.grade-text.fail {
+  color: var(--red-bright);
+  background: rgba(248, 81, 73, 0.1);
+}
+
+.maneuver-details {
+  padding: 0 20px 20px 20px;
+  border-top: 1px solid var(--border);
+  animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.details-section {
+  margin-top: 20px;
+}
+
+.details-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.details-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.details-grid > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.details-grid .label {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.details-grid .value {
+  font-family: 'Consolas', monospace;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.deviation-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.deviation-grid > div {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.deviation-grid > div.pass {
+  border-left: 3px solid var(--green-bright);
+}
+
+.deviation-grid > div.fail {
+  border-left: 3px solid var(--red-bright);
+}
+
+.delete-btn {
+  margin-top: 16px;
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--red);
+  color: var(--red);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.delete-btn:hover {
+  background: var(--red);
+  color: white;
+}
+

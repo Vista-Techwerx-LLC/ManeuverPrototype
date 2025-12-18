@@ -43,6 +43,12 @@ export default function Navbar({ user }) {
           >
             Slow Flight
           </Link>
+          <Link 
+            to="/history" 
+            className={isActive('/history') ? 'active' : ''}
+          >
+            History
+          </Link>
         </div>
 
         <div className="navbar-user">

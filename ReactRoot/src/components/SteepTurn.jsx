@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { supabase } from '../lib/supabase'
 import './SteepTurn.css'
 
 function normalizeAngle(angle) {
@@ -7,6 +8,30 @@ function normalizeAngle(angle) {
   while (normalized > 180) normalized -= 360
   while (normalized < -180) normalized += 360
   return normalized
+}
+
+async function saveManeuverToDatabase(userId, maneuverData) {
+  try {
+    const { error } = await supabase
+      .from('maneuver_results')
+      .insert({
+        user_id: userId,
+        maneuver_type: 'steep_turn',
+        grade: maneuverData.grade,
+        result_data: maneuverData.details
+      })
+    
+    if (error) {
+      console.error('Error saving maneuver:', error)
+      return false
+    }
+    
+    console.log('✅ Maneuver saved to database')
+    return true
+  } catch (error) {
+    console.error('Error saving maneuver:', error)
+    return false
+  }
 }
 
 export default function SteepTurn({ user }) {
@@ -140,21 +165,23 @@ export default function SteepTurn({ user }) {
             ? newTracking.samples.spd.reduce((a, b) => a + b, 0) / newTracking.samples.spd.length
             : 0
           
-          setTracking(prev => ({ 
-            ...prev, 
-            grade: { 
-              allPass, 
-              hdgErr, 
-              hdgPass,
-              averages: {
-                bank: avgBank,
-                alt: avgAlt,
-                spd: avgSpd,
-                altDev: avgAlt - entry.alt,
-                spdDev: avgSpd - entry.spd
-              }
-            } 
-          }))
+          const gradeData = { 
+            allPass, 
+            hdgErr, 
+            hdgPass,
+            averages: {
+              bank: avgBank,
+              alt: avgAlt,
+              spd: avgSpd,
+              altDev: avgAlt - entry.alt,
+              spdDev: avgSpd - entry.spd
+            }
+          }
+          
+          setTracking(prev => ({ ...prev, grade: gradeData }))
+          
+          // Save to database
+          saveManeuver(allPass, hdgErr, newTracking, avgBank, avgAlt, avgSpd)
         }, 0)
       }
 
@@ -202,6 +229,38 @@ export default function SteepTurn({ user }) {
     if (progressCircleRef.current) {
       progressCircleRef.current.style.strokeDashoffset = '263.89'
     }
+  }
+
+  function saveManeuver(allPass, hdgErr, finalTracking, avgBank, avgAlt, avgSpd) {
+    const maneuverData = {
+      grade: allPass ? 'PASS' : 'FAIL',
+      details: {
+        entry: {
+          heading: entry.hdg,
+          altitude: entry.alt,
+          airspeed: entry.spd
+        },
+        deviations: {
+          maxAltitude: finalTracking.maxAltDev,
+          maxAirspeed: finalTracking.maxSpdDev,
+          maxBank: finalTracking.maxBankDev,
+          rolloutHeadingError: hdgErr
+        },
+        averages: {
+          bank: avgBank,
+          altitude: avgAlt,
+          airspeed: avgSpd,
+          altitudeDeviation: avgAlt - entry.alt,
+          airspeedDeviation: avgSpd - entry.spd
+        },
+        busted: finalTracking.busted,
+        turnDirection: finalTracking.turnDirection,
+        totalTurn: finalTracking.totalTurn,
+        timestamp: new Date().toISOString()
+      }
+    }
+    
+    saveManeuverToDatabase(user.id, maneuverData)
   }
 
   function handleStartClick() {
