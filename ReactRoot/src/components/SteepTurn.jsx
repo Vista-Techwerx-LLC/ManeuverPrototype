@@ -12,7 +12,19 @@ function normalizeAngle(angle) {
   return normalized
 }
 
+const saveInProgress = new Set()
+
 async function saveManeuverToDatabase(userId, maneuverData) {
+  const entry = maneuverData.details.entry
+  const saveKey = `${userId}-${entry.heading}-${entry.altitude}-${entry.airspeed}-${maneuverData.details.timestamp}`
+  
+  if (saveInProgress.has(saveKey)) {
+    console.log('⚠️ Save already in progress for this maneuver, skipping duplicate')
+    return false
+  }
+  
+  saveInProgress.add(saveKey)
+  
   try {
     const { error } = await supabase
       .from('maneuver_results')
@@ -20,18 +32,22 @@ async function saveManeuverToDatabase(userId, maneuverData) {
         user_id: userId,
         maneuver_type: 'steep_turn',
         grade: maneuverData.grade,
-        result_data: maneuverData.details
+        result_data: maneuverData.details,
+        skill_level: maneuverData.details.autoStart?.enabled ? maneuverData.details.autoStart.skillLevel : null
       })
     
     if (error) {
       console.error('Error saving maneuver:', error)
+      saveInProgress.delete(saveKey)
       return false
     }
     
     console.log('✅ Maneuver saved to database')
+    setTimeout(() => saveInProgress.delete(saveKey), 10000)
     return true
   } catch (error) {
     console.error('Error saving maneuver:', error)
+    saveInProgress.delete(saveKey)
     return false
   }
 }
@@ -62,6 +78,7 @@ export default function SteepTurn({ user }) {
   const autoStartInRangeStartTime = useRef(null)
   const autoStartPendingTracking = useRef(false)
   const progressCircleRef = useRef(null)
+  const hasBeenSaved = useRef(false)
 
   // Update state based on connection
   useEffect(() => {
@@ -104,9 +121,7 @@ export default function SteepTurn({ user }) {
     }
 
     if (state === 'tracking' && !autoStartPendingTracking.current) {
-      if (!autoStartStatus || autoStartStatus.type !== 'ready') {
-        setAutoStartStatus({ type: 'ready', message: 'Auto-started tracking!' })
-      }
+      setAutoStartStatus(null)
       return
     }
 
@@ -182,6 +197,7 @@ export default function SteepTurn({ user }) {
           })
           setState('tracking')
           setAutoStartStatus({ type: 'monitoring', message: 'Monitoring...' })
+          hasBeenSaved.current = false
         }
       } else {
         autoStartInRangeStartTime.current = null
@@ -216,6 +232,8 @@ export default function SteepTurn({ user }) {
         }
       })
       setState('tracking')
+      setAutoStartStatus(null)
+      hasBeenSaved.current = false
     }
   }, [data, state, pendingStart])
 
@@ -306,8 +324,11 @@ export default function SteepTurn({ user }) {
           
           setTracking(prev => ({ ...prev, grade: gradeData }))
           
-          // Save to database
-          saveManeuver(allPass, hdgErr, newTracking, avgBank, avgAlt, avgSpd)
+          // Save to database (only once)
+          if (!hasBeenSaved.current) {
+            hasBeenSaved.current = true
+            saveManeuver(allPass, hdgErr, newTracking, avgBank, avgAlt, avgSpd)
+          }
         }, 0)
       }
 
@@ -332,6 +353,7 @@ export default function SteepTurn({ user }) {
         spd: []
       }
     })
+    hasBeenSaved.current = false
   }
 
 
@@ -355,6 +377,7 @@ export default function SteepTurn({ user }) {
     if (progressCircleRef.current) {
       progressCircleRef.current.style.strokeDashoffset = '263.89'
     }
+    hasBeenSaved.current = false
   }
 
   function saveManeuver(allPass, hdgErr, finalTracking, avgBank, avgAlt, avgSpd) {
@@ -382,6 +405,10 @@ export default function SteepTurn({ user }) {
         busted: finalTracking.busted,
         turnDirection: finalTracking.turnDirection,
         totalTurn: finalTracking.totalTurn,
+        autoStart: {
+          enabled: autoStartEnabled,
+          skillLevel: autoStartSkillLevel
+        },
         timestamp: new Date().toISOString()
       }
     }

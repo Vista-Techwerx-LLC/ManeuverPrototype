@@ -261,10 +261,12 @@ export default function ViewStudent({ user }) {
                           border: '1px solid var(--border)',
                           borderRadius: '8px'
                         }}
+                        labelFormatter={() => 'Max Altitude Deviation'}
                         formatter={(value) => `${Math.round(value)} ft`}
                       />
                       <Bar 
                         dataKey="maxAltDev" 
+                        name="Max Altitude Deviation"
                         fill="var(--blue)"
                         radius={[4, 4, 0, 0]}
                       />
@@ -285,10 +287,12 @@ export default function ViewStudent({ user }) {
                           border: '1px solid var(--border)',
                           borderRadius: '8px'
                         }}
+                        labelFormatter={() => 'Max Airspeed Deviation'}
                         formatter={(value) => `${Math.round(value)} kt`}
                       />
                       <Bar 
                         dataKey="maxSpdDev" 
+                        name="Max Airspeed Deviation"
                         fill="var(--purple)"
                         radius={[4, 4, 0, 0]}
                       />
@@ -309,10 +313,12 @@ export default function ViewStudent({ user }) {
                           border: '1px solid var(--border)',
                           borderRadius: '8px'
                         }}
+                        labelFormatter={() => 'Rollout Heading Error'}
                         formatter={(value) => `${Math.round(value)}°`}
                       />
                       <Bar 
                         dataKey="rolloutError" 
+                        name="Rollout Heading Error"
                         fill="var(--yellow)"
                         radius={[4, 4, 0, 0]}
                       />
@@ -333,11 +339,13 @@ export default function ViewStudent({ user }) {
                           border: '1px solid var(--border)',
                           borderRadius: '8px'
                         }}
+                        labelFormatter={() => 'Average Bank Angle'}
                         formatter={(value) => `${Math.round(value)}°`}
                       />
                       <Line 
                         type="monotone" 
                         dataKey="avgBank" 
+                        name="Average Bank Angle"
                         stroke="var(--green-bright)" 
                         strokeWidth={2}
                         dot={{ fill: 'var(--green-bright)', r: 4 }}
@@ -374,6 +382,12 @@ function ManeuverCard({ maneuver }) {
   const details = maneuver.result_data
   const isPassed = maneuver.grade === 'PASS'
   const date = new Date(maneuver.created_at)
+  const skillLevel = maneuver.skill_level
+
+  const formatSkillLevel = (level) => {
+    if (!level) return null
+    return level.charAt(0).toUpperCase() + level.slice(1)
+  }
 
   return (
     <div className={`maneuver-card ${isPassed ? 'pass' : 'fail'}`}>
@@ -381,6 +395,11 @@ function ManeuverCard({ maneuver }) {
         <div className="maneuver-info">
           <div className="maneuver-type">
             {maneuver.maneuver_type.replace('_', ' ').toUpperCase()}
+            {skillLevel && (
+              <span className="skill-level-badge">
+                {formatSkillLevel(skillLevel)}
+              </span>
+            )}
           </div>
           <div className="maneuver-date">
             {date.toLocaleDateString()} {date.toLocaleTimeString()}

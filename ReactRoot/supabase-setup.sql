@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS maneuver_results (
   session_id TEXT,
   result_data JSONB,
   grade TEXT,
+  skill_level TEXT,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

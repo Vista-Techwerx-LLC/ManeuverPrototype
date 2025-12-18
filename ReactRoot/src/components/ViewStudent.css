@@ -171,11 +171,25 @@
 .maneuver-type {
   font-size: 16px;
   font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .maneuver-date {
   font-size: 13px;
   color: var(--text-muted);
+}
+
+.skill-level-badge {
+  font-size: 11px;
+  color: var(--blue);
+  font-weight: 500;
+  padding: 3px 10px;
+  background: rgba(88, 166, 255, 0.1);
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .maneuver-grade-badge {

@@ -155,6 +155,12 @@ function ManeuverCard({ maneuver, onDelete }) {
   const details = maneuver.result_data
   const isPassed = maneuver.grade === 'PASS'
   const date = new Date(maneuver.created_at)
+  const skillLevel = maneuver.skill_level
+
+  const formatSkillLevel = (level) => {
+    if (!level) return null
+    return level.charAt(0).toUpperCase() + level.slice(1)
+  }
 
   return (
     <div className={`maneuver-card ${isPassed ? 'pass' : 'fail'}`}>
@@ -162,6 +168,11 @@ function ManeuverCard({ maneuver, onDelete }) {
         <div className="maneuver-info">
           <div className="maneuver-type">
             {maneuver.maneuver_type.replace('_', ' ').toUpperCase()}
+            {skillLevel && (
+              <span className="skill-level-badge">
+                {formatSkillLevel(skillLevel)}
+              </span>
+            )}
           </div>
           <div className="maneuver-date">
             {date.toLocaleDateString()} {date.toLocaleTimeString()}

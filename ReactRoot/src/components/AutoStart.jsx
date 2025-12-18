@@ -4,38 +4,19 @@ import './AutoStart.css'
 export default function AutoStart({ enabled, skillLevel, onToggle, onSkillLevelChange, status, maneuverType = MANEUVER_TYPES.STEEP_TURN }) {
   const tolerances = AUTO_START_TOLERANCES[maneuverType]
   
-  const getToleranceDisplay = (level) => {
+  const getToleranceItems = (level) => {
     const tol = tolerances[level]
     if (maneuverType === MANEUVER_TYPES.STEEP_TURN) {
-      return (
-        <div className="tolerance-items">
-          <div className="tolerance-item">
-            <span className="tolerance-param">Bank Angle</span>
-            <span className="tolerance-range">45° ±{tol.bank}°</span>
-          </div>
-        </div>
-      )
+      return [
+        { label: 'Bank Angle', value: `45° ±${tol.bank}°` }
+      ]
     } else {
-      return (
-        <div className="tolerance-items">
-          <div className="tolerance-item">
-            <span className="tolerance-param">Altitude</span>
-            <span className="tolerance-range">±{tol.altitude} ft</span>
-          </div>
-          <div className="tolerance-item">
-            <span className="tolerance-param">Airspeed</span>
-            <span className="tolerance-range">{tol.airspeed.min} to +{tol.airspeed.max} kt</span>
-          </div>
-          <div className="tolerance-item">
-            <span className="tolerance-param">Heading</span>
-            <span className="tolerance-range">±{tol.heading}°</span>
-          </div>
-          <div className="tolerance-item">
-            <span className="tolerance-param">Bank</span>
-            <span className="tolerance-range">±{tol.bank}°</span>
-          </div>
-        </div>
-      )
+      return [
+        { label: 'Altitude', value: `±${tol.altitude} ft` },
+        { label: 'Airspeed', value: `${tol.airspeed.min} to +${tol.airspeed.max} kt` },
+        { label: 'Heading', value: `±${tol.heading}°` },
+        { label: 'Bank Angle', value: `±${tol.bank}°` }
+      ]
     }
   }
 
@@ -72,13 +53,22 @@ export default function AutoStart({ enabled, skillLevel, onToggle, onSkillLevelC
               className={`skill-level-btn ${skillLevel === SKILL_LEVELS.PRO ? 'active' : ''}`}
               onClick={() => onSkillLevelChange(SKILL_LEVELS.PRO)}
             >
-              Pro<br /><span style={{ whiteSpace: 'nowrap', fontSize: '9px' }}>(ACS Standards)</span>
+              Pro
             </button>
           </div>
           
           <div className="tolerance-info">
-            <div className="tolerance-label">Auto-Start Tolerances</div>
-            {getToleranceDisplay(skillLevel)}
+            <div className="tolerance-header">
+              <span className="tolerance-title">Auto-Start Tolerances</span>
+            </div>
+            <div className="tolerance-items">
+              {getToleranceItems(skillLevel).map((item, index) => (
+                <div key={index} className="tolerance-item">
+                  <span className="tolerance-item-label">{item.label}</span>
+                  <span className="tolerance-item-value">{item.value}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </>
       )}
