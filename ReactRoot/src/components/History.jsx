@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import FlightPath3D from './FlightPath3D'
 import './History.css'
 
 export default function History({ user }) {
@@ -269,6 +270,15 @@ function ManeuverCard({ maneuver, onDelete }) {
                   <span className="value">{details.turnDirection?.toUpperCase() || 'N/A'}</span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {details.flightPath && details.flightPath.length > 0 && (
+            <div className="details-section">
+              <FlightPath3D 
+                flightPath={details.flightPath} 
+                entry={details.entry}
+              />
             </div>
           )}
 

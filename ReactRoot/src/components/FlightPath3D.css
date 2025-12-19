@@ -1,0 +1,266 @@
+.flight-path-3d-container {
+  width: 100%;
+  margin-top: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card);
+  position: relative;
+}
+
+.flight-path-3d-header {
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(0, 0, 0, 0.3) 0%, rgba(0, 0, 0, 0.1) 100%);
+}
+
+.flight-path-3d-header h3 {
+  margin: 0 0 12px 0;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.flight-path-3d-controls-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  position: relative;
+  z-index: 20;
+}
+
+.flight-path-control-btn {
+  background: var(--border);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 40px;
+  pointer-events: auto;
+  z-index: 30;
+  position: relative;
+}
+
+.flight-path-control-btn:hover {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+  transform: scale(1.05);
+}
+
+.flight-path-progress {
+  flex: 1;
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+
+.flight-path-live-data {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-left: 12px;
+  padding-left: 20px;
+  border-left: 1px solid var(--border);
+}
+
+.live-data-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-data-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.live-data-value {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: 'Consolas', monospace;
+  min-width: 60px;
+  text-align: right;
+}
+
+.live-data-value.good {
+  color: #00ff88;
+}
+
+.live-data-value.warning {
+  color: #ffff44;
+}
+
+.live-data-value.bad {
+  color: #ff4444;
+}
+
+.flight-path-progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue) 0%, var(--green) 100%);
+  transition: width 0.1s linear;
+  border-radius: 4px;
+}
+
+.flight-path-3d-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.legend-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.3);
+}
+
+.flight-path-3d-instructions {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  font-style: italic;
+}
+
+.flight-path-3d-canvas {
+  width: 100%;
+  height: 600px;
+  position: relative;
+  cursor: grab;
+  background: #2a2a3a;
+}
+
+.flight-path-3d-canvas:active {
+  cursor: grabbing;
+}
+
+.flight-path-3d-empty {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.flight-path-point-info {
+  position: absolute;
+  top: 80px;
+  right: 20px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  z-index: 10;
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.flight-path-point-info h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.close-info-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.close-info-btn:hover {
+  background: var(--border);
+  color: var(--text);
+}
+
+.point-info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.point-info-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.info-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.info-value {
+  font-size: 16px;
+  font-weight: 600;
+  font-family: 'Consolas', monospace;
+  color: var(--text);
+}
+
+
+@media (max-width: 768px) {
+  .flight-path-3d-canvas {
+    height: 400px;
+  }
+  
+  .flight-path-point-info {
+    position: relative;
+    top: auto;
+    right: auto;
+    margin: 16px;
+  }
+  
+  .flight-path-3d-legend {
+    font-size: 11px;
+  }
+}

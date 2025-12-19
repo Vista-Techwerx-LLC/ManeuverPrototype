@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { supabase } from '../lib/supabase'
 import AutoStart from './AutoStart'
+import FlightPath3D from './FlightPath3D'
 import { SKILL_LEVELS, MANEUVER_TYPES, checkSteepTurnInRange } from '../utils/autoStartTolerances'
 import './SteepTurn.css'
 
@@ -69,7 +70,9 @@ export default function SteepTurn({ user }) {
       bank: [],
       alt: [],
       spd: []
-    }
+    },
+    // Track full flight path for 3D visualization
+    flightPath: []
   })
   const [pendingStart, setPendingStart] = useState(false)
   const [autoStartEnabled, setAutoStartEnabled] = useState(false)
@@ -107,7 +110,8 @@ export default function SteepTurn({ user }) {
             bank: [],
             alt: [],
             spd: []
-          }
+          },
+          flightPath: []
         })
       }
       autoStartInRangeStartTime.current = null
@@ -157,7 +161,8 @@ export default function SteepTurn({ user }) {
             bank: [],
             alt: [],
             spd: []
-          }
+          },
+          flightPath: []
         })
         autoStartPendingTracking.current = false
         autoStartInRangeStartTime.current = null
@@ -178,7 +183,9 @@ export default function SteepTurn({ user }) {
           const newEntry = {
             hdg: data.hdg_true,
             alt: data.alt_ft,
-            spd: data.ias_kt
+            spd: data.ias_kt,
+            lat: data.lat,
+            lon: data.lon
           }
           setEntry(newEntry)
           setTracking({
@@ -249,7 +256,15 @@ export default function SteepTurn({ user }) {
     if (hdg == null || alt == null || spd == null || bank == null) return
 
     setTracking(prev => {
-      let newTracking = { ...prev }
+      let newTracking = { 
+        ...prev,
+        flightPath: prev.flightPath || [],
+        samples: prev.samples || {
+          bank: [],
+          alt: [],
+          spd: []
+        }
+      }
 
       // Determine turn direction
       if (newTracking.turnDirection === null && Math.abs(bank) > 20) {
@@ -280,6 +295,23 @@ export default function SteepTurn({ user }) {
         newTracking.samples.bank.push(bankAbs)
         newTracking.samples.alt.push(alt)
         newTracking.samples.spd.push(spd)
+      }
+
+      // Capture flight path data (sample every ~0.5 seconds to avoid too much data)
+      const now = Date.now()
+      const lastSampleTime = newTracking.lastSampleTime || 0
+      if (now - lastSampleTime >= 500 || newTracking.flightPath.length === 0) {
+        newTracking.flightPath.push({
+          timestamp: now,
+          lat: data.lat,
+          lon: data.lon,
+          alt: alt,
+          heading: hdg,
+          bank: bank,
+          airspeed: spd,
+          pitch: data.pitch_deg || 0
+        })
+        newTracking.lastSampleTime = now
       }
 
       if (Math.abs(altDev) > Math.abs(newTracking.maxAltDev)) newTracking.maxAltDev = altDev
@@ -387,7 +419,9 @@ export default function SteepTurn({ user }) {
         entry: {
           heading: entry.hdg,
           altitude: entry.alt,
-          airspeed: entry.spd
+          airspeed: entry.spd,
+          lat: entry.lat,
+          lon: entry.lon
         },
         deviations: {
           maxAltitude: finalTracking.maxAltDev,
@@ -405,6 +439,7 @@ export default function SteepTurn({ user }) {
         busted: finalTracking.busted,
         turnDirection: finalTracking.turnDirection,
         totalTurn: finalTracking.totalTurn,
+        flightPath: finalTracking.flightPath || [],
         autoStart: {
           enabled: autoStartEnabled,
           skillLevel: autoStartSkillLevel
@@ -719,6 +754,20 @@ export default function SteepTurn({ user }) {
                     </>
                   )}
                 </div>
+
+                {tracking.flightPath && tracking.flightPath.length > 0 && (
+                  <div style={{ marginTop: '24px' }}>
+                    <FlightPath3D 
+                      flightPath={tracking.flightPath} 
+                      entry={entry ? {
+                        lat: entry.lat,
+                        lon: entry.lon,
+                        altitude: entry.alt,
+                        alt: entry.alt
+                      } : null}
+                    />
+                  </div>
+                )}
 
                 <button className="big-button reset" onClick={reset}>
                   Reset & Try Again
