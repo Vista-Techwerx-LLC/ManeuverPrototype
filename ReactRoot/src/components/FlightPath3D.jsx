@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import './FlightPath3D.css'
 
+// Track component instances
+let instanceCounter = 0
+
 export default function FlightPath3D({ flightPath, entry }) {
+  const instanceId = useRef(++instanceCounter)
   const containerRef = useRef(null)
   const sceneRef = useRef(null)
   const rendererRef = useRef(null)
@@ -17,46 +21,82 @@ export default function FlightPath3D({ flightPath, entry }) {
   const animationTimeRef = useRef(0)
   const pointSpheresRef = useRef([])
   const originAltRef = useRef(0)
+  const isPlayingRef = useRef(false)
+  const lastPausedIndexRef = useRef(-1)
+
+  // Keep isPlayingRef in sync with isPlaying state
+  useEffect(() => {
+    isPlayingRef.current = isPlaying
+  }, [isPlaying])
 
   useEffect(() => {
-    if (!containerRef.current || !flightPath || flightPath.length === 0) return
+    if (!containerRef.current || !flightPath || flightPath.length === 0) {
+      return
+    }
 
-    // Initialize Three.js scene - much brighter
+    // Always create a fresh scene - don't reuse to avoid accumulation
     const scene = new THREE.Scene()
     scene.background = new THREE.Color(0x2a2a3a)
     scene.fog = new THREE.Fog(0x2a2a3a, 2000, 8000)
+    
+    // Ensure scene is completely empty
+    while (scene.children.length > 0) {
+      scene.remove(scene.children[0])
+    }
+    
     sceneRef.current = scene
 
     const container = containerRef.current
     const width = container.clientWidth
     const height = container.clientHeight
 
-    // Camera
+    // Always create fresh camera
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 10000)
     cameraRef.current = camera
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true })
+    // Always create fresh renderer
+    // Remove old renderer if it exists
+    if (rendererRef.current && rendererRef.current.domElement && container.contains(rendererRef.current.domElement)) {
+      container.removeChild(rendererRef.current.domElement)
+    }
+    
+    const renderer = new THREE.WebGLRenderer({
+      antialias: window.devicePixelRatio <= 2,
+      powerPreference: "high-performance",
+      stencil: false,
+      depth: true
+    })
     renderer.setSize(width, height)
-    renderer.setPixelRatio(window.devicePixelRatio)
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     renderer.shadowMap.enabled = true
     renderer.shadowMap.type = THREE.PCFSoftShadowMap
+    renderer.outputColorSpace = THREE.SRGBColorSpace
+    renderer.toneMapping = THREE.ACESFilmicToneMapping
+    renderer.toneMappingExposure = 1.0
+    renderer.setClearColor(0x2a2a3a, 1)
     container.appendChild(renderer.domElement)
     rendererRef.current = renderer
 
-    // Lighting - much brighter
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1.2)
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0)
     scene.add(ambientLight)
     
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5)
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2)
     directionalLight.position.set(500, 1000, 500)
     directionalLight.castShadow = true
+    directionalLight.shadow.mapSize.width = 2048
+    directionalLight.shadow.mapSize.height = 2048
+    directionalLight.shadow.camera.near = 0.5
+    directionalLight.shadow.camera.far = 5000
+    directionalLight.shadow.bias = -0.0001
     scene.add(directionalLight)
     
-    // Add additional fill light
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.8)
+    const fillLight = new THREE.DirectionalLight(0xffffff, 0.6)
     fillLight.position.set(-500, 500, -500)
     scene.add(fillLight)
+    
+    const rimLight = new THREE.DirectionalLight(0x88aaff, 0.4)
+    rimLight.position.set(0, 200, -1000)
+    scene.add(rimLight)
 
     // Calculate bounds and center
     const lats = flightPath.map(p => p.lat).filter(lat => lat != null)
@@ -117,135 +157,218 @@ export default function FlightPath3D({ flightPath, entry }) {
 
     if (pathPoints.length === 0) return
 
-    // Create a smooth curve from points
-    const curve = new THREE.CatmullRomCurve3(pathPoints, false, 'centripetal')
-    const curvePoints = curve.getPoints(pathPoints.length * 10)
+    // Optimized path creation with reduced geometry complexity
+    const getColorCategory = (altDev) => {
+      const absDev = Math.abs(altDev)
+      if (absDev <= 100) return 'good'
+      if (absDev <= 150) return 'warning'
+      return 'bad'
+    }
 
-    // Create tube geometry for the path (much more visible than a line)
-    const tubeGeometry = new THREE.TubeGeometry(curve, curvePoints.length, 12, 8, false)
-    
-    // Create brighter material
-    const tubeMaterial = new THREE.MeshPhongMaterial({
-      color: 0x6ab0ff,
-      emissive: 0x2a5a8a,
-      shininess: 100,
-      transparent: true,
-      opacity: 0.9
-    })
-
-    const tube = new THREE.Mesh(tubeGeometry, tubeMaterial)
-    tube.castShadow = true
-    scene.add(tube)
-
-    // Create colored segments based on altitude deviation - brighter and more visible
-    for (let i = 0; i < pathPoints.length - 1; i++) {
-      const point1 = pathPoints[i]
-      const point2 = pathPoints[i + 1]
-      const altDev = pathData[i].alt - originAlt
-      
-      let color, emissiveColor
-      if (Math.abs(altDev) <= 100) {
-        color = 0x00ff88
-        emissiveColor = 0x00aa44
-      } else if (Math.abs(altDev) <= 150) {
-        color = 0xffff44
-        emissiveColor = 0xaaaa00
-      } else {
-        color = 0xff4444
-        emissiveColor = 0xaa0000
+    const getColorForCategory = (category) => {
+      switch (category) {
+        case 'good':
+          return { color: 0x00ff88, emissive: 0x00aa44 }
+        case 'warning':
+          return { color: 0xffff44, emissive: 0xaaaa00 }
+        case 'bad':
+          return { color: 0xff4444, emissive: 0xaa0000 }
+        default:
+          return { color: 0x6ab0ff, emissive: 0x2a5a8a }
       }
+    }
 
-      const segmentGeometry = new THREE.CylinderGeometry(10, 10, point1.distanceTo(point2), 8)
-      const segmentMaterial = new THREE.MeshPhongMaterial({ 
-        color,
-        emissive: emissiveColor,
-        emissiveIntensity: 0.5
+    const pathGroup = new THREE.Group()
+    const segmentRadius = 16
+
+    // Sample points to reduce geometry complexity
+    const sampleRate = Math.max(1, Math.floor(pathPoints.length / 200))
+    const sampledPoints = []
+    const sampledData = []
+
+    for (let i = 0; i < pathPoints.length; i += sampleRate) {
+      sampledPoints.push(pathPoints[i])
+      sampledData.push(pathData[i])
+    }
+
+    let currentSegmentPoints = []
+    let currentCategory = null
+
+    const createSegment = (points, category) => {
+      if (points.length < 2) return
+
+      const segmentCurve = new THREE.CatmullRomCurve3(points, false, 'centripetal')
+      const segmentGeometry = new THREE.TubeGeometry(segmentCurve, Math.max(points.length * 2, 10), segmentRadius, 12, false)
+      const colors = getColorForCategory(category)
+
+      const segmentMaterial = new THREE.MeshStandardMaterial({
+        color: colors.color,
+        emissive: colors.emissive,
+        emissiveIntensity: 0.5,
+        metalness: 0.1,
+        roughness: 0.5
       })
       
       const segment = new THREE.Mesh(segmentGeometry, segmentMaterial)
-      segment.position.copy(point1.clone().add(point2).multiplyScalar(0.5))
-      segment.lookAt(point2)
-      segment.rotateX(Math.PI / 2)
-      scene.add(segment)
+      segment.castShadow = true
+      pathGroup.add(segment)
     }
 
-    // Create hover point spheres for mouse tracking
+    for (let i = 0; i < sampledData.length; i++) {
+      const altDev = sampledData[i].alt - originAlt
+      const category = getColorCategory(altDev)
+
+      if (category !== currentCategory) {
+        if (currentSegmentPoints.length > 0) {
+          createSegment(currentSegmentPoints, currentCategory)
+        }
+        currentSegmentPoints = [sampledPoints[i]]
+        currentCategory = category
+      } else {
+        currentSegmentPoints.push(sampledPoints[i])
+      }
+    }
+
+    if (currentSegmentPoints.length > 0) {
+      createSegment(currentSegmentPoints, currentCategory)
+    }
+
+    scene.add(pathGroup)
+
+    // Create hover point spheres for mouse tracking (optimized)
     const pointSpheres = []
-    pathData.forEach((data, index) => {
-      if (index % 3 !== 0) return // Sample every 3rd point for better tracking
-      
-      const sphereGeometry = new THREE.SphereGeometry(20, 16, 16)
-      const sphereMaterial = new THREE.MeshPhongMaterial({
+    const sphereGeometry = new THREE.SphereGeometry(18, 16, 12) // Reduced detail
+    const sphereMaterial = new THREE.MeshStandardMaterial({
         color: 0xffffff,
         emissive: 0x666666,
+      emissiveIntensity: 0.15,
+      metalness: 0.2,
+      roughness: 0.5,
         transparent: true,
-        opacity: 0.1
-      })
-      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial)
+      opacity: 0.08
+    })
+
+    // Sample less frequently for better performance
+    const sphereSampleRate = Math.max(1, Math.floor(pathData.length / 100))
+    pathData.forEach((data, index) => {
+      if (index % sphereSampleRate !== 0) return
+
+      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial.clone())
       sphere.position.copy(data.position)
       sphere.userData = { index, data }
-      sphere.visible = true // Always visible but very transparent
+      sphere.visible = true
       scene.add(sphere)
       pointSpheres.push(sphere)
     })
     pointSpheresRef.current = pointSpheres
 
-    // Create animated plane
+    // Always create fresh plane - remove old one if it exists
+    if (planeRef.current && scene.children.includes(planeRef.current)) {
+      scene.remove(planeRef.current)
+      planeRef.current.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose()
+        if (obj.material) {
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach(mat => mat.dispose())
+          } else {
+            obj.material.dispose()
+          }
+        }
+      })
+    }
+
     const planeGroup = new THREE.Group()
-    
-    // Plane body
-    const planeBodyGeometry = new THREE.BoxGeometry(40, 8, 120)
-    const planeBodyMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x222222 })
-    const planeBody = new THREE.Mesh(planeBodyGeometry, planeBodyMaterial)
-    planeBody.castShadow = true
-    planeGroup.add(planeBody)
 
-    // Wings
-    const wingGeometry = new THREE.BoxGeometry(200, 2, 40)
-    const wingMaterial = new THREE.MeshPhongMaterial({ color: 0xcccccc, emissive: 0x111111 })
-    const leftWing = new THREE.Mesh(wingGeometry, wingMaterial)
-    leftWing.position.set(-100, 0, 0)
-    leftWing.castShadow = true
-    planeGroup.add(leftWing)
-    
-    const rightWing = new THREE.Mesh(wingGeometry, wingMaterial)
-    rightWing.position.set(100, 0, 0)
-    rightWing.castShadow = true
-    planeGroup.add(rightWing)
+      const planeBodyGeometry = new THREE.BoxGeometry(40, 8, 120, 4, 2, 8)
+      const planeBodyMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0x222222,
+        emissiveIntensity: 0.1,
+        metalness: 0.3,
+        roughness: 0.4
+      })
+      const planeBody = new THREE.Mesh(planeBodyGeometry, planeBodyMaterial)
+      planeBody.castShadow = true
+      planeGroup.add(planeBody)
 
-    // Tail
-    const tailGeometry = new THREE.BoxGeometry(20, 60, 8)
-    const tailMaterial = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x222222 })
-    const tail = new THREE.Mesh(tailGeometry, tailMaterial)
-    tail.position.set(0, 30, -50)
-    tail.castShadow = true
-    planeGroup.add(tail)
+      const wingGeometry = new THREE.BoxGeometry(200, 2, 40, 8, 1, 4)
+      const wingMaterial = new THREE.MeshStandardMaterial({
+        color: 0xcccccc,
+        emissive: 0x111111,
+        emissiveIntensity: 0.1,
+        metalness: 0.2,
+        roughness: 0.5
+      })
+      const leftWing = new THREE.Mesh(wingGeometry, wingMaterial)
+      leftWing.position.set(-100, 0, 0)
+      leftWing.castShadow = true
+      planeGroup.add(leftWing)
 
+      const rightWing = new THREE.Mesh(wingGeometry, wingMaterial)
+      rightWing.position.set(100, 0, 0)
+      rightWing.castShadow = true
+      planeGroup.add(rightWing)
+
+      const tailGeometry = new THREE.BoxGeometry(20, 60, 8, 2, 4, 2)
+      const tailMaterial = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: 0x222222,
+        emissiveIntensity: 0.1,
+        metalness: 0.3,
+        roughness: 0.4
+      })
+      const tail = new THREE.Mesh(tailGeometry, tailMaterial)
+      tail.position.set(0, 30, -50)
+      tail.castShadow = true
+      planeGroup.add(tail)
+
+    // Set initial rotation so plane's nose points along +Z axis
+    planeGroup.rotation.order = 'YXZ'  // Set rotation order once
     planeGroup.position.copy(pathPoints[0])
+
+    // Remove old plane if it exists, but keep other scene objects (pathGroup, lights, etc.)
+    if (planeRef.current && scene.children.includes(planeRef.current)) {
+      scene.remove(planeRef.current)
+      planeRef.current.traverse((obj) => {
+        if (obj.geometry) obj.geometry.dispose()
+        if (obj.material) {
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach(mat => mat.dispose())
+          } else {
+            obj.material.dispose()
+          }
+        }
+      })
+    }
+    
     scene.add(planeGroup)
     planeRef.current = planeGroup
 
-    // Entry marker
-    const entryGeometry = new THREE.SphereGeometry(30, 16, 16)
-    const entryMaterial = new THREE.MeshPhongMaterial({ 
+    const entryGeometry = new THREE.SphereGeometry(30, 32, 32)
+    const entryMaterial = new THREE.MeshStandardMaterial({ 
       color: 0x00ffff,
       emissive: 0x004444,
+      emissiveIntensity: 0.5,
+      metalness: 0.4,
+      roughness: 0.3,
       transparent: true,
-      opacity: 0.9
+      opacity: 0.95
     })
     const entryMarker = new THREE.Mesh(entryGeometry, entryMaterial)
     entryMarker.position.set(0, 0, 0)
     entryMarker.castShadow = true
     scene.add(entryMarker)
 
-    // Exit marker
     const lastPoint = pathPoints[pathPoints.length - 1]
-    const exitGeometry = new THREE.SphereGeometry(30, 16, 16)
-    const exitMaterial = new THREE.MeshPhongMaterial({ 
+    const exitGeometry = new THREE.SphereGeometry(30, 32, 32)
+    const exitMaterial = new THREE.MeshStandardMaterial({ 
       color: 0xff00ff,
       emissive: 0x440044,
+      emissiveIntensity: 0.5,
+      metalness: 0.4,
+      roughness: 0.3,
       transparent: true,
-      opacity: 0.9
+      opacity: 0.95
     })
     const exitMarker = new THREE.Mesh(exitGeometry, exitMaterial)
     exitMarker.position.copy(lastPoint)
@@ -258,10 +381,12 @@ export default function FlightPath3D({ flightPath, entry }) {
       Math.abs(pathPoints[pathPoints.length - 1].z - pathPoints[0].z)
     ) * 1.5
 
-    const planeGeometry = new THREE.PlaneGeometry(planeSize, planeSize)
-    const planeMaterial = new THREE.MeshPhongMaterial({
+    const planeGeometry = new THREE.PlaneGeometry(planeSize, planeSize, 20, 20)
+    const planeMaterial = new THREE.MeshStandardMaterial({
       color: 0x444455,
       side: THREE.DoubleSide,
+      metalness: 0.1,
+      roughness: 0.8,
       transparent: true,
       opacity: 0.4
     })
@@ -312,8 +437,8 @@ export default function FlightPath3D({ flightPath, entry }) {
         const spherical = new THREE.Spherical()
         spherical.setFromVector3(camera.position.clone().sub(center))
         
-        spherical.theta -= deltaX * 0.01
-        spherical.phi += deltaY * 0.01
+        spherical.theta -= deltaX * 0.008
+        spherical.phi += deltaY * 0.008
         spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi))
         spherical.radius = cameraDistance
 
@@ -362,10 +487,12 @@ export default function FlightPath3D({ flightPath, entry }) {
 
     const onWheel = (e) => {
       e.preventDefault()
-      const delta = e.deltaY * 0.01
+      const delta = e.deltaY * 0.008
       const direction = camera.position.clone().sub(center).normalize()
       cameraDistance = Math.max(maxDim * 0.5, Math.min(maxDim * 5, cameraDistance + delta * 50))
-      camera.position.copy(center.clone().add(direction.multiplyScalar(cameraDistance)))
+      const newPosition = center.clone().add(direction.multiplyScalar(cameraDistance))
+      camera.position.lerp(newPosition, 0.1)
+      camera.lookAt(center)
     }
 
     container.addEventListener('mousedown', onMouseDown)
@@ -373,70 +500,139 @@ export default function FlightPath3D({ flightPath, entry }) {
     container.addEventListener('mouseup', onMouseUp)
     container.addEventListener('wheel', onWheel)
 
-    // Animation
     let lastTime = performance.now()
-    const animationDuration = 10000 // 10 seconds
+    const firstTimestamp = pathData[0]?.timestamp || 0
+    const lastTimestamp = pathData[pathData.length - 1]?.timestamp || 0
+    const animationDuration = lastTimestamp > firstTimestamp ? (lastTimestamp - firstTimestamp) : 10000
+    let cameraTarget = new THREE.Vector3()
+    let cameraPosition = camera.position.clone()
+    let frameCount = 0
 
+    const curve = new THREE.CatmullRomCurve3(pathPoints, false, 'centripetal')
+
+    let previousDirection = new THREE.Vector3(0, 0, 1)
+
+    const smoothStep = (t) => t * t * (3 - 2 * t)
+    
     const animate = (currentTime) => {
       animationFrameRef.current = requestAnimationFrame(animate)
-      
-      const deltaTime = currentTime - lastTime
+
+      const deltaTime = Math.min(currentTime - lastTime, 100) / 1000
       lastTime = currentTime
+
+      frameCount++
       
-      if (isPlaying && pathData.length > 0) {
-        animationTimeRef.current += deltaTime
-        const progress = (animationTimeRef.current % animationDuration) / animationDuration
+      if (isPlayingRef.current && pathData.length > 0) {
+        lastPausedIndexRef.current = -1
+        animationTimeRef.current += deltaTime * 1000
+        const progress = Math.min(animationTimeRef.current / animationDuration, 1.0)
         setAnimationProgress(progress)
         
-        const pathIndex = Math.floor(progress * (pathData.length - 1))
-        const nextIndex = Math.min(pathIndex + 1, pathData.length - 1)
-        const t = (progress * (pathData.length - 1)) % 1
-        
-        const currentPathData = pathData[pathIndex]
-        const nextPathData = pathData[nextIndex]
-        
-        if (currentPathData && nextPathData) {
+        if (progress >= 1.0) {
+          setIsPlaying(false)
+          animationTimeRef.current = animationDuration
+          const finalData = pathData[pathData.length - 1]
+          if (finalData) {
+            planeGroup.position.copy(finalData.position)
+            setCurrentData({
+              alt: finalData.alt,
+              bank: finalData.bank,
+              heading: finalData.heading,
+              airspeed: finalData.airspeed,
+              pitch: finalData.pitch
+            })
+          }
+        } else {
+          const exactIndex = progress * (pathData.length - 1)
+          const pathIndex = Math.floor(exactIndex)
+          const nextIndex = Math.min(pathIndex + 1, pathData.length - 1)
+          const t = smoothStep(exactIndex % 1)
+          
+          const currentPathData = pathData[pathIndex]
+          const nextPathData = pathData[nextIndex]
+          
+          if (currentPathData && nextPathData) {
           const position = currentPathData.position.clone().lerp(nextPathData.position, t)
-          const bank = currentPathData.bank + (nextPathData.bank - currentPathData.bank) * t
-          const pitch = currentPathData.pitch + (nextPathData.pitch - currentPathData.pitch) * t
-          const heading = currentPathData.heading + (nextPathData.heading - currentPathData.heading) * t
-          
+          const bank = THREE.MathUtils.lerp(currentPathData.bank, nextPathData.bank, t)
+          const pitch = THREE.MathUtils.lerp(currentPathData.pitch, nextPathData.pitch, t)
+          const heading = THREE.MathUtils.lerp(currentPathData.heading, nextPathData.heading, t)
+
           planeGroup.position.copy(position)
-          planeGroup.rotation.z = (bank * Math.PI) / 180
-          planeGroup.rotation.x = (-pitch * Math.PI) / 180
-          planeGroup.rotation.y = ((heading - 90) * Math.PI) / 180
+
+          // Calculate direction of travel for base orientation
+          let direction = nextPathData.position.clone().sub(currentPathData.position).normalize()
           
-          // Update current data for HUD
+          // Check if direction flipped (dot product < 0 means >90 degree change)
+          const dotProduct = direction.dot(previousDirection)
+          
+          // If direction flipped dramatically, reverse it to prevent mirroring
+          if (dotProduct < 0) {
+            direction.negate()
+          }
+          
+          // Smooth direction changes to prevent sudden flips
+          if (dotProduct < 0.95) {
+            // Significant direction change - smooth it
+            direction.lerp(previousDirection, 0.3).normalize()
+          }
+          
+          // Update previous direction
+          previousDirection.copy(direction)
+          
+          // Create target point ahead for lookAt
+          const lookAhead = position.clone().add(direction.clone().multiplyScalar(50))
+          
+          // Reset rotation and orient plane to face direction of travel
+          planeGroup.rotation.set(0, 0, 0)
+          planeGroup.lookAt(lookAhead)
+          
+          // Apply pitch (rotation around local X-axis - right wing)
+          // Positive pitch = nose up, which in Three.js is negative X rotation
+          planeGroup.rotateX(-pitch * Math.PI / 180)
+          
+          // Apply bank (rotation around local Z-axis - forward/backward)
+          // Positive bank = right wing down, which in Three.js is positive Z rotation
+          planeGroup.rotateZ(bank * Math.PI / 180)
+          
+          // Update current data less frequently for better performance
+          if (frameCount % 2 === 0) {
           const interpolatedData = {
-            alt: currentPathData.alt + (nextPathData.alt - currentPathData.alt) * t,
+              alt: THREE.MathUtils.lerp(currentPathData.alt, nextPathData.alt, t),
             bank: bank,
             heading: heading,
-            airspeed: currentPathData.airspeed + (nextPathData.airspeed - currentPathData.airspeed) * t,
+              airspeed: THREE.MathUtils.lerp(currentPathData.airspeed, nextPathData.airspeed, t),
             pitch: pitch
           }
           setCurrentData(interpolatedData)
+          }
           
-          // Make camera follow plane
+          // Optimized camera following with smoother interpolation
           const followDistance = maxDim * 0.8
           const followHeight = maxDim * 0.3
-          const cameraOffset = new THREE.Vector3(
-            Math.sin((heading * Math.PI) / 180) * followDistance,
+          const targetOffset = new THREE.Vector3(
+            Math.sin(heading * Math.PI / 180) * followDistance,
             followHeight,
-            Math.cos((heading * Math.PI) / 180) * followDistance
+            Math.cos(heading * Math.PI / 180) * followDistance
           )
-          camera.position.copy(position.clone().add(cameraOffset))
-          camera.lookAt(position)
+          const targetPosition = position.clone().add(targetOffset)
+
+          cameraPosition.lerp(targetPosition, 1 - Math.exp(-deltaTime * 3.5))
+          camera.position.copy(cameraPosition)
+          cameraTarget.lerp(position, 1 - Math.exp(-deltaTime * 5))
+          camera.lookAt(cameraTarget)
+          }
         }
-      } else if (!isPlaying && pathData.length > 0) {
-        // When paused, show data at current progress position
-        const progress = animationProgress
-        const pathIndex = Math.floor(progress * (pathData.length - 1))
-        if (pathData[pathIndex]) {
+      } else if (!isPlayingRef.current && pathData.length > 0) {
+        // When paused, only update if we're at a different index to prevent flickering
+        const progress = Math.max(0, Math.min(1, animationProgress))
+        const pathIndex = Math.round(progress * (pathData.length - 1))
+        if (pathIndex !== lastPausedIndexRef.current && pathData[pathIndex]) {
+          lastPausedIndexRef.current = pathIndex
           setCurrentData(pathData[pathIndex])
         }
       }
       
-      renderer.render(scene, camera) // Always render, even when paused
+      renderer.render(scene, camera)
     }
     
     // Set initial data
@@ -458,20 +654,28 @@ export default function FlightPath3D({ flightPath, entry }) {
     }
     window.addEventListener('resize', handleResize)
 
-    // Store references for cleanup
+    const pathGroupGeometries = []
+    const pathGroupMaterials = []
+    pathGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        if (child.geometry) pathGroupGeometries.push(child.geometry)
+        if (child.material) pathGroupMaterials.push(child.material)
+      }
+    })
+
     const geometriesToDispose = [
-      tubeGeometry,
       entryGeometry,
       exitGeometry,
       planeGeometry,
-      ...pointSpheres.map(s => s.geometry)
+      ...pointSpheres.map(s => s.geometry),
+      ...pathGroupGeometries
     ]
     const materialsToDispose = [
-      tubeMaterial,
       entryMaterial,
       exitMaterial,
       planeMaterial,
-      ...pointSpheres.map(s => s.material)
+      ...pointSpheres.map(s => s.material),
+      ...pathGroupMaterials
     ]
 
     // Cleanup
@@ -481,29 +685,59 @@ export default function FlightPath3D({ flightPath, entry }) {
       container.removeEventListener('mousemove', onMouseMove)
       container.removeEventListener('mouseup', onMouseUp)
       container.removeEventListener('wheel', onWheel)
-      
+
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
       }
-      
+
+      // Clear the scene of all objects before disposing
+      if (sceneRef.current) {
+        while (sceneRef.current.children.length > 0) {
+          const child = sceneRef.current.children[0]
+          sceneRef.current.remove(child)
+          // Dispose of geometries and materials for each child
+          child.traverse((obj) => {
+            if (obj.geometry) obj.geometry.dispose()
+            if (obj.material) {
+              if (Array.isArray(obj.material)) {
+                obj.material.forEach(mat => mat.dispose())
+              } else {
+                obj.material.dispose()
+              }
+            }
+          })
+        }
+      }
+
       if (renderer.domElement && container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement)
       }
-      
-      // Dispose geometries and materials
+
+      // Dispose remaining geometries and materials (fallback)
       geometriesToDispose.forEach(geo => {
         if (geo) geo.dispose()
       })
       materialsToDispose.forEach(mat => {
         if (mat) mat.dispose()
       })
+
+      // Clear references for next mount
+      planeRef.current = null
+      sceneRef.current = null
+      rendererRef.current = null
+      cameraRef.current = null
     }
-  }, [flightPath, entry, isPlaying])
+  }, [flightPath, entry])
 
   const togglePlay = () => {
-    setIsPlaying(!isPlaying)
     if (!isPlaying) {
-      animationTimeRef.current = animationProgress * 10000
+      const firstTimestamp = flightPath?.[0]?.timestamp || 0
+      const lastTimestamp = flightPath?.[flightPath.length - 1]?.timestamp || 0
+      const duration = lastTimestamp > firstTimestamp ? (lastTimestamp - firstTimestamp) : 10000
+      animationTimeRef.current = animationProgress * duration
+      setIsPlaying(true)
+    } else {
+      setIsPlaying(false)
     }
   }
 
@@ -511,7 +745,7 @@ export default function FlightPath3D({ flightPath, entry }) {
     setIsPlaying(false)
     animationTimeRef.current = 0
     setAnimationProgress(0)
-    // Reset current data to first point
+    lastPausedIndexRef.current = -1
     if (flightPath && flightPath.length > 0) {
       const firstPoint = flightPath[0]
       if (firstPoint) {

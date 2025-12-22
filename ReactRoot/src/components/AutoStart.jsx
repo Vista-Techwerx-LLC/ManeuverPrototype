@@ -38,6 +38,12 @@ export default function AutoStart({ enabled, skillLevel, onToggle, onSkillLevelC
         <>
           <div className="skill-level-selector">
             <button
+              className={`skill-level-btn ${skillLevel === SKILL_LEVELS.DEV ? 'active' : ''}`}
+              onClick={() => onSkillLevelChange(SKILL_LEVELS.DEV)}
+            >
+              Dev
+            </button>
+            <button
               className={`skill-level-btn ${skillLevel === SKILL_LEVELS.BEGINNER ? 'active' : ''}`}
               onClick={() => onSkillLevelChange(SKILL_LEVELS.BEGINNER)}
             >

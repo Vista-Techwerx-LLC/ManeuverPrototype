@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { supabase } from '../lib/supabase'
 import AutoStart from './AutoStart'
 import FlightPath3D from './FlightPath3D'
-import { SKILL_LEVELS, MANEUVER_TYPES, checkSteepTurnInRange } from '../utils/autoStartTolerances'
+import { SKILL_LEVELS, MANEUVER_TYPES, checkSteepTurnInRange, getSteepTurnEstablishmentThreshold, getSteepTurnPassTolerances } from '../utils/autoStartTolerances'
 import './SteepTurn.css'
 
 function normalizeAngle(angle) {
@@ -72,16 +72,22 @@ export default function SteepTurn({ user }) {
       spd: []
     },
     // Track full flight path for 3D visualization
-    flightPath: []
+    flightPath: [],
+    // Track if turn is fully established (bank >= 40°) before checking violations
+    turnEstablished: false
   })
   const [pendingStart, setPendingStart] = useState(false)
   const [autoStartEnabled, setAutoStartEnabled] = useState(false)
   const [autoStartSkillLevel, setAutoStartSkillLevel] = useState(SKILL_LEVELS.BEGINNER)
   const [autoStartStatus, setAutoStartStatus] = useState(null)
-  const autoStartInRangeStartTime = useRef(null)
-  const autoStartPendingTracking = useRef(false)
+  const autoStartPhase = useRef('waiting_for_level')
+  const levelDetectedTime = useRef(null)
+  const baselineData = useRef(null)
+  const hasReachedSignificantBank = useRef(false)
+  const hasReached25Degrees = useRef(false)
   const progressCircleRef = useRef(null)
   const hasBeenSaved = useRef(false)
+  const levelAfterEstablishmentTime = useRef(null)
 
   // Update state based on connection
   useEffect(() => {
@@ -95,27 +101,15 @@ export default function SteepTurn({ user }) {
   // Auto-start monitoring
   useEffect(() => {
     if (!autoStartEnabled || !data || !connected) {
-      if (autoStartPendingTracking.current && state === 'tracking') {
-        setEntry(null)
-        setState('ready')
-        setTracking({
-          turnDirection: null,
-          totalTurn: 0,
-          lastHdg: null,
-          maxAltDev: 0,
-          maxSpdDev: 0,
-          maxBankDev: 0,
-          busted: { alt: false, spd: false, bank: false },
-          samples: {
-            bank: [],
-            alt: [],
-            spd: []
-          },
-          flightPath: []
-        })
+      if (state === 'tracking' && autoStartPhase.current !== 'idle') {
+        cancelTracking()
       }
-      autoStartInRangeStartTime.current = null
-      autoStartPendingTracking.current = false
+      autoStartPhase.current = 'waiting_for_level'
+      levelDetectedTime.current = null
+      baselineData.current = null
+      hasReachedSignificantBank.current = false
+      hasReached25Degrees.current = false
+      levelAfterEstablishmentTime.current = null
       setAutoStartStatus(null)
       return
     }
@@ -124,69 +118,91 @@ export default function SteepTurn({ user }) {
       return
     }
 
-    if (state === 'tracking' && !autoStartPendingTracking.current) {
+    const bank = data.bank_deg || 0
+    const bankAbs = Math.abs(bank)
+
+    if (state === 'tracking' && autoStartPhase.current === 'tracking') {
+      if (bankAbs >= 30) {
+        hasReachedSignificantBank.current = true
+      }
       setAutoStartStatus(null)
       return
     }
 
-    if (state === 'tracking' && autoStartPendingTracking.current) {
-      const inRange = checkSteepTurnInRange(data, autoStartSkillLevel)
-      
-      if (inRange) {
-        const timeInRange = (Date.now() - autoStartInRangeStartTime.current) / 1000
-        const remainingTime = Math.max(0, 2 - timeInRange)
-        
-        if (remainingTime > 0) {
-          setAutoStartStatus({ 
-            type: 'countdown', 
-            message: `Confirming in ${remainingTime.toFixed(1)}s...` 
-          })
-        } else {
-          setAutoStartStatus({ type: 'ready', message: 'Auto-started tracking!' })
-          autoStartInRangeStartTime.current = null
-          autoStartPendingTracking.current = false
-        }
-      } else {
-        setEntry(null)
-        setState('ready')
-        setTracking({
-          turnDirection: null,
-          totalTurn: 0,
-          lastHdg: null,
-          maxAltDev: 0,
-          maxSpdDev: 0,
-          maxBankDev: 0,
-          busted: { alt: false, spd: false, bank: false },
-          samples: {
-            bank: [],
-            alt: [],
-            spd: []
-          },
-          flightPath: []
-        })
-        autoStartPendingTracking.current = false
-        autoStartInRangeStartTime.current = null
-        const bankAbs = Math.abs(data.bank_deg || 0)
-        setAutoStartStatus({ type: 'monitoring', message: `Bank: ${Math.round(bankAbs)}° (target: 45°)` })
-      }
-      return
-    }
-
     if (state === 'ready') {
-      const inRange = checkSteepTurnInRange(data, autoStartSkillLevel)
-
-      if (inRange) {
-        if (autoStartInRangeStartTime.current === null) {
-          autoStartInRangeStartTime.current = Date.now()
-          autoStartPendingTracking.current = true
+      if (autoStartPhase.current === 'waiting_for_level') {
+        if (bankAbs <= 3) {
+          if (levelDetectedTime.current === null) {
+            levelDetectedTime.current = Date.now()
+            baselineData.current = {
+              hdg: data.hdg_true,
+              alt: data.alt_ft,
+              spd: data.ias_kt,
+              lat: data.lat,
+              lon: data.lon,
+              samples: []
+            }
+          }
+          
+          const timeLevel = (Date.now() - levelDetectedTime.current) / 1000
+          if (timeLevel >= 1.0) {
+            autoStartPhase.current = 'waiting_for_turn'
+            setAutoStartStatus({ type: 'monitoring', message: 'Level flight detected - waiting for turn...' })
+          } else {
+            setAutoStartStatus({ type: 'monitoring', message: `Leveling... (${timeLevel.toFixed(1)}s)` })
+          }
+          
+          if (baselineData.current) {
+            baselineData.current.samples.push({
+              hdg: data.hdg_true,
+              alt: data.alt_ft,
+              spd: data.ias_kt,
+              bank: bank,
+              timestamp: Date.now()
+            })
+            if (baselineData.current.samples.length > 20) {
+              baselineData.current.samples.shift()
+            }
+          }
+        } else {
+          levelDetectedTime.current = null
+          baselineData.current = null
+          setAutoStartStatus({ type: 'monitoring', message: `Waiting for level flight... (Bank: ${Math.round(bankAbs)}°)` })
+        }
+      } else if (autoStartPhase.current === 'waiting_for_turn') {
+        if (bankAbs <= 3) {
+          if (baselineData.current) {
+            baselineData.current.samples.push({
+              hdg: data.hdg_true,
+              alt: data.alt_ft,
+              spd: data.ias_kt,
+              bank: bank,
+              timestamp: Date.now()
+            })
+            if (baselineData.current.samples.length > 20) {
+              baselineData.current.samples.shift()
+            }
+          }
+          setAutoStartStatus({ type: 'monitoring', message: 'Level flight - waiting for turn...' })
+        } else if (bankAbs > 5) {
+          const avgHdg = baselineData.current && baselineData.current.samples.length > 0
+            ? baselineData.current.samples.reduce((sum, s) => sum + (s.hdg || 0), 0) / baselineData.current.samples.length
+            : baselineData.current?.hdg || data.hdg_true
+          const avgAlt = baselineData.current && baselineData.current.samples.length > 0
+            ? baselineData.current.samples.reduce((sum, s) => sum + (s.alt || 0), 0) / baselineData.current.samples.length
+            : baselineData.current?.alt || data.alt_ft
+          const avgSpd = baselineData.current && baselineData.current.samples.length > 0
+            ? baselineData.current.samples.reduce((sum, s) => sum + (s.spd || 0), 0) / baselineData.current.samples.length
+            : baselineData.current?.spd || data.ias_kt
           
           const newEntry = {
-            hdg: data.hdg_true,
-            alt: data.alt_ft,
-            spd: data.ias_kt,
-            lat: data.lat,
-            lon: data.lon
+            hdg: avgHdg,
+            alt: avgAlt,
+            spd: avgSpd,
+            lat: baselineData.current?.lat || data.lat,
+            lon: baselineData.current?.lon || data.lon
           }
+          
           setEntry(newEntry)
           setTracking({
             turnDirection: null,
@@ -200,16 +216,21 @@ export default function SteepTurn({ user }) {
               bank: [],
               alt: [],
               spd: []
-            }
+            },
+            flightPath: [],
+            baselineData: baselineData.current,
+            turnEstablished: false
           })
           setState('tracking')
-          setAutoStartStatus({ type: 'monitoring', message: 'Monitoring...' })
+          autoStartPhase.current = 'tracking'
+          hasReachedSignificantBank.current = false
+          hasReached25Degrees.current = false
+          setAutoStartStatus({ type: 'ready', message: 'Turn detected - tracking started!' })
           hasBeenSaved.current = false
+          
+          levelDetectedTime.current = null
+          baselineData.current = null
         }
-      } else {
-        autoStartInRangeStartTime.current = null
-        const bankAbs = Math.abs(data.bank_deg || 0)
-        setAutoStartStatus({ type: 'monitoring', message: `Bank: ${Math.round(bankAbs)}° (target: 45°)` })
       }
     }
   }, [autoStartEnabled, state, data, connected, autoStartSkillLevel])
@@ -221,7 +242,9 @@ export default function SteepTurn({ user }) {
       const newEntry = {
         hdg: data.hdg_true,
         alt: data.alt_ft,
-        spd: data.ias_kt
+        spd: data.ias_kt,
+        lat: data.lat,
+        lon: data.lon
       }
       setEntry(newEntry)
       setTracking({
@@ -236,9 +259,11 @@ export default function SteepTurn({ user }) {
           bank: [],
           alt: [],
           spd: []
-        }
+        },
+        turnEstablished: false
       })
       setState('tracking')
+      autoStartPhase.current = 'idle'
       setAutoStartStatus(null)
       hasBeenSaved.current = false
     }
@@ -255,6 +280,74 @@ export default function SteepTurn({ user }) {
 
     if (hdg == null || alt == null || spd == null || bank == null) return
 
+    const establishmentThreshold = getSteepTurnEstablishmentThreshold(autoStartSkillLevel)
+    const passTolerances = getSteepTurnPassTolerances(autoStartSkillLevel)
+    const bankAbs = Math.abs(bank)
+
+    // Track when bank reaches 25 degrees
+    if (bankAbs >= 25) {
+      hasReached25Degrees.current = true
+    }
+
+    // Cancel tracking if bank drops below 20 degrees after reaching 25 degrees, but before establishment (only for auto-start tracking)
+    if (autoStartPhase.current === 'tracking' && !tracking.turnEstablished && hasReached25Degrees.current && bankAbs < 20) {
+      setTimeout(() => {
+        cancelTracking()
+        autoStartPhase.current = 'waiting_for_level'
+        levelDetectedTime.current = null
+        baselineData.current = null
+        hasReachedSignificantBank.current = false
+        hasReached25Degrees.current = false
+        levelAfterEstablishmentTime.current = null
+        setAutoStartStatus({ type: 'monitoring', message: 'Turn canceled - bank angle dropped below 20° before establishing turn' })
+      }, 0)
+      return
+    }
+
+    // Cancel tracking if bank goes back to level before turn is established (only for auto-start tracking)
+    if (autoStartPhase.current === 'tracking' && !tracking.turnEstablished && bankAbs <= 3) {
+      setTimeout(() => {
+        cancelTracking()
+        autoStartPhase.current = 'waiting_for_level'
+        levelDetectedTime.current = null
+        baselineData.current = null
+        hasReachedSignificantBank.current = false
+        hasReached25Degrees.current = false
+        levelAfterEstablishmentTime.current = null
+        setAutoStartStatus({ type: 'monitoring', message: 'Turn canceled - leveled out before establishing turn' })
+      }, 0)
+      return
+    }
+
+    // After turn is established, cancel only if bank is between -5 to 5 degrees for 3 seconds (only for auto-start tracking)
+    if (autoStartPhase.current === 'tracking' && tracking.turnEstablished) {
+      if (bankAbs <= 5) {
+        // Bank is level (between -5 to 5 degrees) - start or continue timer
+        if (levelAfterEstablishmentTime.current === null) {
+          levelAfterEstablishmentTime.current = Date.now()
+        } else {
+          // Check if we've been level for 3 seconds
+          const timeLevel = (Date.now() - levelAfterEstablishmentTime.current) / 1000
+          if (timeLevel >= 3) {
+            setTimeout(() => {
+              cancelTracking()
+              autoStartPhase.current = 'waiting_for_level'
+              levelDetectedTime.current = null
+              baselineData.current = null
+              hasReachedSignificantBank.current = false
+              hasReached25Degrees.current = false
+              levelAfterEstablishmentTime.current = null
+              setAutoStartStatus({ type: 'monitoring', message: 'Turn canceled - leveled out for 3 seconds' })
+            }, 0)
+            return
+          }
+        }
+      } else {
+        // Bank is not level - reset timer
+        levelAfterEstablishmentTime.current = null
+      }
+    }
+
     setTracking(prev => {
       let newTracking = { 
         ...prev,
@@ -267,7 +360,7 @@ export default function SteepTurn({ user }) {
       }
 
       // Determine turn direction
-      if (newTracking.turnDirection === null && Math.abs(bank) > 20) {
+      if (newTracking.turnDirection === null && bankAbs > 20) {
         newTracking.turnDirection = bank > 0 ? 'right' : 'left'
       }
 
@@ -287,8 +380,12 @@ export default function SteepTurn({ user }) {
       // Calculate deviations
       const altDev = alt - entry.alt
       const spdDev = spd - entry.spd
-      const bankAbs = Math.abs(bank)
       const bankDev = bankAbs - 45
+
+      // Mark turn as established when bank reaches the skill-level threshold
+      if (bankAbs >= establishmentThreshold && !newTracking.turnEstablished) {
+        newTracking.turnEstablished = true
+      }
 
       // Track all values for averages (only when in significant bank)
       if (bankAbs > 20) {
@@ -314,20 +411,25 @@ export default function SteepTurn({ user }) {
         newTracking.lastSampleTime = now
       }
 
+      // Always track max deviations for display purposes
       if (Math.abs(altDev) > Math.abs(newTracking.maxAltDev)) newTracking.maxAltDev = altDev
       if (Math.abs(spdDev) > Math.abs(newTracking.maxSpdDev)) newTracking.maxSpdDev = spdDev
       if (Math.abs(bankDev) > Math.abs(newTracking.maxBankDev)) newTracking.maxBankDev = bankDev
 
-      if (Math.abs(altDev) > 100) newTracking.busted.alt = true
-      if (Math.abs(spdDev) > 10) newTracking.busted.spd = true
-      if (bankAbs < 40 || bankAbs > 50) newTracking.busted.bank = true
+      // Only check for skill-level violations after turn is fully established
+      if (newTracking.turnEstablished) {
+        if (Math.abs(altDev) > passTolerances.altitude) newTracking.busted.alt = true
+        if (Math.abs(spdDev) > passTolerances.airspeed) newTracking.busted.spd = true
+        if (bankAbs < passTolerances.bank.min || bankAbs > passTolerances.bank.max) newTracking.busted.bank = true
+      }
 
       // Check for completion
       if (newTracking.totalTurn >= 360) {
         const hdgErr = Math.abs(normalizeAngle(hdg - entry.hdg))
+        const passTolerancesForCompletion = passTolerances
         setTimeout(() => {
           setState('complete')
-          const hdgPass = hdgErr <= 10
+          const hdgPass = hdgErr <= passTolerancesForCompletion.rolloutHeading
           const allPass = !newTracking.busted.alt && !newTracking.busted.spd && !newTracking.busted.bank && hdgPass
           
           // Calculate averages
@@ -366,7 +468,7 @@ export default function SteepTurn({ user }) {
 
       return newTracking
     })
-  }, [data, state, entry])
+  }, [data, state, entry, autoStartSkillLevel])
 
   function cancelTracking() {
     setEntry(null)
@@ -383,8 +485,17 @@ export default function SteepTurn({ user }) {
         bank: [],
         alt: [],
         spd: []
-      }
+      },
+      turnEstablished: false
     })
+    if (autoStartEnabled) {
+      autoStartPhase.current = 'waiting_for_level'
+      levelDetectedTime.current = null
+      baselineData.current = null
+      hasReachedSignificantBank.current = false
+      hasReached25Degrees.current = false
+      levelAfterEstablishmentTime.current = null
+    }
     hasBeenSaved.current = false
   }
 
@@ -404,8 +515,17 @@ export default function SteepTurn({ user }) {
         bank: [],
         alt: [],
         spd: []
-      }
+      },
+      turnEstablished: false
     })
+    if (autoStartEnabled) {
+      autoStartPhase.current = 'waiting_for_level'
+      levelDetectedTime.current = null
+      baselineData.current = null
+      hasReachedSignificantBank.current = false
+      hasReached25Degrees.current = false
+      levelAfterEstablishmentTime.current = null
+    }
     if (progressCircleRef.current) {
       progressCircleRef.current.style.strokeDashoffset = '263.89'
     }
@@ -463,29 +583,41 @@ export default function SteepTurn({ user }) {
   const circumference = 263.89
   const progressOffset = circumference * (1 - progress)
 
+  const passTolerances = getSteepTurnPassTolerances(autoStartSkillLevel)
+  
   const altDev = entry ? (data?.alt_ft || 0) - entry.alt : 0
   const spdDev = entry ? (data?.ias_kt || 0) - entry.spd : 0
   const bankAbs = data?.bank_deg ? Math.abs(data.bank_deg) : 0
   const bankDev = bankAbs - 45
 
-  const altInTolerance = Math.abs(altDev) <= 100
-  const spdInTolerance = Math.abs(spdDev) <= 10
-  const bankInTolerance = bankAbs >= 40 && bankAbs <= 50
+  const altInTolerance = Math.abs(altDev) <= passTolerances.altitude
+  const spdInTolerance = Math.abs(spdDev) <= passTolerances.airspeed
+  const bankInTolerance = bankAbs >= passTolerances.bank.min && bankAbs <= passTolerances.bank.max
 
-  const altPct = Math.min(Math.abs(altDev) / 100, 1) * 50
-  const spdPct = Math.min(Math.abs(spdDev) / 10, 1) * 50
+  const altPct = Math.min(Math.abs(altDev) / passTolerances.altitude, 1) * 50
+  const spdPct = Math.min(Math.abs(spdDev) / passTolerances.airspeed, 1) * 50
   const bankPct = Math.min(Math.abs(bankDev) / 5, 1) * 50
+
+  const flightPathEntry = useMemo(() => {
+    if (!entry) return null
+    return {
+      lat: entry.lat,
+      lon: entry.lon,
+      altitude: entry.alt,
+      alt: entry.alt
+    }
+  }, [entry?.lat, entry?.lon, entry?.alt])
 
   const grade = tracking.grade
   const allPass = grade?.allPass ?? false
   const summary = grade ? (
     allPass
-      ? 'All parameters within ACS standards!'
+      ? 'All parameters within skill-level standards!'
       : [
-          tracking.busted.alt && 'altitude exceeded ±100 ft',
-          tracking.busted.spd && 'airspeed exceeded ±10 kt',
-          tracking.busted.bank && 'bank outside 40-50°',
-          !grade.hdgPass && 'rollout heading error > 10°'
+          tracking.busted.alt && `altitude exceeded ±${passTolerances.altitude} ft`,
+          tracking.busted.spd && `airspeed exceeded ±${passTolerances.airspeed} kt`,
+          tracking.busted.bank && `bank outside ${passTolerances.bank.min}-${passTolerances.bank.max}°`,
+          !grade.hdgPass && `rollout heading error > ${passTolerances.rolloutHeading}°`
         ].filter(Boolean).join(', ')
   ) : ''
 
@@ -612,7 +744,7 @@ export default function SteepTurn({ user }) {
 
                 <div className="tolerance-item">
                   <div className="tolerance-header">
-                    <span className="tolerance-name">Altitude (±100 ft)</span>
+                    <span className="tolerance-name">Altitude (±{passTolerances.altitude} ft)</span>
                     <span className={`tolerance-value ${altInTolerance ? 'pass' : 'fail'}`}>
                       {(altDev >= 0 ? '+' : '') + Math.round(altDev)} ft
                     </span>
@@ -629,15 +761,15 @@ export default function SteepTurn({ user }) {
                     <div className="center-line" />
                   </div>
                   <div className="tolerance-limits">
-                    <span>-100</span>
+                    <span>-{passTolerances.altitude}</span>
                     <span>0</span>
-                    <span>+100</span>
+                    <span>+{passTolerances.altitude}</span>
                   </div>
                 </div>
 
                 <div className="tolerance-item">
                   <div className="tolerance-header">
-                    <span className="tolerance-name">Airspeed (±10 kt)</span>
+                    <span className="tolerance-name">Airspeed (±{passTolerances.airspeed} kt)</span>
                     <span className={`tolerance-value ${spdInTolerance ? 'pass' : 'fail'}`}>
                       {(spdDev >= 0 ? '+' : '') + Math.round(spdDev)} kt
                     </span>
@@ -654,15 +786,15 @@ export default function SteepTurn({ user }) {
                     <div className="center-line" />
                   </div>
                   <div className="tolerance-limits">
-                    <span>-10</span>
+                    <span>-{passTolerances.airspeed}</span>
                     <span>0</span>
-                    <span>+10</span>
+                    <span>+{passTolerances.airspeed}</span>
                   </div>
                 </div>
 
                 <div className="tolerance-item">
                   <div className="tolerance-header">
-                    <span className="tolerance-name">Bank Angle (45° ±5°)</span>
+                    <span className="tolerance-name">Bank Angle ({passTolerances.bank.min}°-{passTolerances.bank.max}°)</span>
                     <span className={`tolerance-value ${bankInTolerance ? 'pass' : 'fail'}`}>
                       {Math.round(bankAbs)}°
                     </span>
@@ -679,9 +811,9 @@ export default function SteepTurn({ user }) {
                     <div className="center-line" />
                   </div>
                   <div className="tolerance-limits">
-                    <span>40°</span>
+                    <span>{passTolerances.bank.min}°</span>
                     <span>45°</span>
-                    <span>50°</span>
+                    <span>{passTolerances.bank.max}°</span>
                   </div>
                 </div>
               </div>
@@ -693,30 +825,30 @@ export default function SteepTurn({ user }) {
                 <div className={`grade ${allPass ? 'pass' : 'fail'}`}>
                   {allPass ? 'PASS' : 'FAIL'}
                 </div>
-                <div className="summary">{summary || 'Rolled out within ±10° of entry heading'}</div>
+                <div className="summary">{summary || `Rolled out within ±${passTolerances.rolloutHeading}° of entry heading`}</div>
 
                 <div className="deviations-list">
                   <div className="deviation-row">
                     <span className="param">Max Altitude Deviation</span>
-                    <span className={`max ${Math.abs(tracking.maxAltDev) <= 100 ? 'pass' : 'fail'}`}>
+                    <span className={`max ${Math.abs(tracking.maxAltDev) <= passTolerances.altitude ? 'pass' : 'fail'}`}>
                       {(tracking.maxAltDev >= 0 ? '+' : '') + Math.round(tracking.maxAltDev)} ft
                     </span>
                   </div>
                   <div className="deviation-row">
                     <span className="param">Max Airspeed Deviation</span>
-                    <span className={`max ${Math.abs(tracking.maxSpdDev) <= 10 ? 'pass' : 'fail'}`}>
+                    <span className={`max ${Math.abs(tracking.maxSpdDev) <= passTolerances.airspeed ? 'pass' : 'fail'}`}>
                       {(tracking.maxSpdDev >= 0 ? '+' : '') + Math.round(tracking.maxSpdDev)} kt
                     </span>
                   </div>
                   <div className="deviation-row">
                     <span className="param">Max Bank Deviation</span>
-                    <span className={`max ${Math.abs(tracking.maxBankDev) <= 5 ? 'pass' : 'fail'}`}>
+                    <span className={`max ${Math.abs(tracking.maxBankDev) <= Math.max(passTolerances.bank.max - 45, 45 - passTolerances.bank.min) ? 'pass' : 'fail'}`}>
                       {(tracking.maxBankDev >= 0 ? '+' : '') + Math.round(tracking.maxBankDev)}° from 45°
                     </span>
                   </div>
                   <div className="deviation-row">
                     <span className="param">Rollout Heading Error</span>
-                    <span className={`max ${grade?.hdgErr <= 10 ? 'pass' : 'fail'}`}>
+                    <span className={`max ${grade?.hdgErr <= passTolerances.rolloutHeading ? 'pass' : 'fail'}`}>
                       {grade ? Math.round(grade.hdgErr) : 0}°
                     </span>
                   </div>
@@ -759,12 +891,7 @@ export default function SteepTurn({ user }) {
                   <div style={{ marginTop: '24px' }}>
                     <FlightPath3D 
                       flightPath={tracking.flightPath} 
-                      entry={entry ? {
-                        lat: entry.lat,
-                        lon: entry.lon,
-                        altitude: entry.alt,
-                        alt: entry.alt
-                      } : null}
+                      entry={flightPathEntry}
                     />
                   </div>
                 )}
@@ -779,11 +906,11 @@ export default function SteepTurn({ user }) {
               <div className="card">
                 <h2>Waiting to Start</h2>
                 <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                  <strong>ACS Standards (PA.V.A.S5):</strong><br />
-                  • Altitude: ±100 feet<br />
-                  • Airspeed: ±10 knots<br />
-                  • Bank: 45° ±5°<br />
-                  • Rollout heading: ±10°<br /><br />
+                  <strong>Skill-Level Standards ({autoStartSkillLevel.charAt(0).toUpperCase() + autoStartSkillLevel.slice(1)}):</strong><br />
+                  • Altitude: ±{passTolerances.altitude} feet<br />
+                  • Airspeed: ±{passTolerances.airspeed} knots<br />
+                  • Bank: {passTolerances.bank.min}°-{passTolerances.bank.max}°<br />
+                  • Rollout heading: ±{passTolerances.rolloutHeading}°<br /><br />
                   Establish level flight at maneuvering speed, then click <strong>Start Tracking</strong> to capture entry parameters and begin monitoring your 360° steep turn.
                 </p>
               </div>
