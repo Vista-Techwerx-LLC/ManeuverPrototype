@@ -1,8 +1,8 @@
-# Landing Tracker - JKA Airport
+# Landing Tracker - KJKA Airport
 
 ## Overview
 
-The Landing Tracker is a comprehensive approach and landing monitoring system designed for Jack Northrop Field (JKA) airport. It provides real-time tracking of your landing approach with automatic phase detection and compliance checking against professional standards.
+The Landing Tracker is a comprehensive approach and landing monitoring system designed for Jack Edwards Airport (KJKA) in Gulf Shores, Alabama. It provides real-time tracking of your landing approach with automatic phase detection and compliance checking against professional standards.
 
 ## Features
 
@@ -15,17 +15,30 @@ The system automatically detects which phase of the landing you're in:
 - **Rollout**: On the ground, decelerating after touchdown
 
 ### 2. **Real-Time Visualization**
+
+#### First-Person 3D View (Activates within 3 NM) 🎯
+An immersive cockpit-perspective view that shows:
+- **Visual Gates**: Green glowing hoops positioned at the 1.5 NM, 1.0 NM, and 0.5 NM gates
+- **Runway**: Full 3D runway with markings, centerline, and threshold markers
+- **Glidepath Line**: Orange reference line showing the 3° descent path
+- **HUD Overlay**: Real-time distance, altitude, and airspeed display
+- **Dynamic Camera**: Moves and rotates with your aircraft's position, heading, pitch, and bank
+- **Gate Highlighting**: Gates pulse when you're close to passing through them
+
+#### 2D Maps (Always Active)
 - **Top View**: Shows your position relative to the runway centerline and approach gates
 - **Side Profile**: Displays your altitude profile against the 3° glidepath
 - Live aircraft position tracking with flight path history
 
-### 3. **JKA Airport Standards**
+### 3. **KJKA Airport Standards**
 
 #### Airport Data
+- **Airport**: Jack Edwards Airport (KJKA)
+- **Location**: Gulf Shores, Alabama
 - **Field Elevation**: 17 ft MSL
 - **Pattern Altitude**: 1,017 ft MSL (prop aircraft)
 - **Glidepath**: 3° (standard ILS glidepath)
-- **Runway 25**: Heading 250°, 5,091 ft length
+- **Runway 25**: Heading 245°, 6,491 ft length
 
 #### Approach Gates
 The system monitors three critical gates on final approach:
@@ -107,7 +120,13 @@ The system automatically grades your landing as PASS or FAIL based on:
 ### During Flight
 1. Click **Start Tracking** when you're ready to begin your approach
 2. The system will automatically detect your position and phase
-3. Watch the real-time displays:
+3. **Within 3 NM**: The immersive **First-Person 3D View** activates
+   - Fly through the green glowing hoops to stay on glidepath
+   - Keep the runway centered in your view
+   - Follow the orange glidepath reference line
+   - Watch the HUD for real-time parameters
+4. Watch the real-time displays:
+   - **First-Person View**: Immersive 3D cockpit perspective (within 3 NM)
    - **Live Data**: Current flight parameters
    - **Top View**: Your position relative to the runway
    - **Side Profile**: Your altitude on the glidepath
@@ -126,7 +145,7 @@ The system automatically grades your landing as PASS or FAIL based on:
 
 ### Pattern Entry
 - Join the downwind at 1,017 ft MSL, about 0.7-1.0 NM from the runway
-- Fly parallel to Runway 25 (opposite heading: 070°)
+- Fly parallel to Runway 25 (opposite heading: 065°)
 - Maintain Vref + 20 kt
 
 ### Base Turn
@@ -136,11 +155,14 @@ The system automatically grades your landing as PASS or FAIL based on:
 - Configure aircraft (extend gear, first flaps)
 
 ### Final Approach
-- Turn to align with runway heading (250°)
+- Turn to align with runway heading (245°)
 - Establish on the 3° glidepath
 - **Critical**: Must be stabilized by 500 ft AGL
 - Complete landing configuration
 - Maintain Vref + 5-10 kt
+- **Use the First-Person View**: Fly through the center of each green hoop
+- Keep the runway centerline aligned with your crosshair
+- Follow the orange glidepath line as your visual reference
 - Monitor glidepath deviation display
 
 ### Touchdown
@@ -185,10 +207,11 @@ Potential additions for future versions:
 
 ## Coordinates Reference
 
-JKA Runway 25 (approximate):
-- Threshold: 33.9228°N, 118.3350°W
-- Opposite end: 33.9258°N, 118.3246°W
-- Magnetic heading: 250°
+KJKA Runway 25:
+- Threshold: 30.2899°N, 87.6720°W
+- Opposite end: 30.2958°N, 87.6875°W
+- Magnetic heading: 245°
+- Location: Gulf Shores, Alabama
 
 *Note: These are approximate coordinates. The system uses distance and bearing calculations relative to the threshold, so slight coordinate variations won't significantly affect tracking accuracy.*
 

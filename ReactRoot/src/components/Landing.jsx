@@ -14,6 +14,7 @@ import {
   normalizeAngle
 } from '../utils/landingStandards'
 import ApproachPath from './ApproachPath'
+import FirstPersonApproachView from './FirstPersonApproachView'
 import './Landing.css'
 
 const saveInProgress = new Set()
@@ -315,7 +316,7 @@ export default function Landing({ user }) {
     <div className="landing-page">
       <div className="landing-container">
         <h1>Landing Approach Tracker</h1>
-        <p className="subtitle">JKA (Jack Northrop Field) — Runway {selectedRunway}</p>
+        <p className="subtitle">KJKA (Jack Edwards Airport, Gulf Shores AL) — Runway {selectedRunway}</p>
 
         <div className="landing-grid">
           {/* Left Column: Controls and Configuration */}
@@ -357,7 +358,7 @@ export default function Landing({ user }) {
                     onChange={(e) => setSelectedRunway(e.target.value)}
                     disabled={tracking}
                   >
-                    <option value="25">25 (Heading 250°)</option>
+                    <option value="25">25 (Heading 245°)</option>
                   </select>
                 </label>
               </div>
@@ -415,7 +416,23 @@ export default function Landing({ user }) {
           <div className="right-col">
             {tracking && (
               <>
-                {/* Approach Path Visualization */}
+                {/* First-Person 3D View (activates within 3 NM) */}
+                {distanceToThreshold !== null && distanceToThreshold <= 3 && (
+                  <div className="card">
+                    <h2>🎯 First-Person View</h2>
+                    <p style={{ fontSize: '0.9rem', color: '#aaa', marginBottom: '12px' }}>
+                      Fly through the green hoops to stay on the 3° glidepath
+                    </p>
+                    <FirstPersonApproachView
+                      runway={runway}
+                      aircraftData={data}
+                      distanceToThreshold={distanceToThreshold}
+                      currentPhase={currentPhase}
+                    />
+                  </div>
+                )}
+
+                {/* Approach Path Visualization (2D maps) */}
                 <div className="card">
                   <h2>Approach Path</h2>
                   <ApproachPath
@@ -531,9 +548,10 @@ export default function Landing({ user }) {
 
             {!tracking && state === 'ready' && (
               <div className="card">
-                <h2>JKA Approach Standards</h2>
+                <h2>KJKA Approach Standards</h2>
                 <div className="info-section">
-                  <p><strong>Airport:</strong> Jack Northrop Field (JKA)</p>
+                  <p><strong>Airport:</strong> Jack Edwards Airport (KJKA)</p>
+                  <p><strong>Location:</strong> Gulf Shores, Alabama</p>
                   <p><strong>Field Elevation:</strong> {JKA_AIRPORT.elevation} ft MSL</p>
                   <p><strong>Pattern Altitude:</strong> {JKA_AIRPORT.patternAltitude} ft MSL</p>
                   <p><strong>Glidepath:</strong> {GLIDEPATH.angle}°</p>

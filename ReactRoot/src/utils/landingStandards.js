@@ -75,26 +75,27 @@ export function calculateLateralDeviation(aircraftLat, aircraftLon, centerlineLa
   return crossTrack
 }
 
-// JKA Airport Definition
+// KJKA Airport Definition (Jack Edwards Airport, Gulf Shores, Alabama)
 export const JKA_AIRPORT = {
-  code: 'JKA',
-  name: 'Jack Northrop Field Hawthorne Municipal',
+  code: 'KJKA',
+  name: 'Jack Edwards Airport',
+  location: 'Gulf Shores, Alabama',
   elevation: 17, // ft MSL
   patternAltitude: 1017, // ft MSL (prop aircraft)
   
   // Runway 25 (primary for this implementation)
   runway25: {
-    heading: 250, // magnetic heading
+    heading: 245, // magnetic heading
     threshold: {
-      lat: 33.9228, // Approximate coordinates for JKA Runway 25
-      lon: -118.3350,
+      lat: 30.2899, // KJKA Runway 25 threshold
+      lon: -87.6720,
       elevation: 17 // ft MSL
     },
-    length: 5091, // feet
-    width: 150, // feet
+    length: 6491, // feet
+    width: 100, // feet
     oppositeEnd: {
-      lat: 33.9258,
-      lon: -118.3246
+      lat: 30.2958,
+      lon: -87.6875
     }
   }
 }
