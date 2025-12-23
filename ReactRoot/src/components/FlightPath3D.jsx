@@ -510,7 +510,9 @@ export default function FlightPath3D({ flightPath, entry }) {
 
     const curve = new THREE.CatmullRomCurve3(pathPoints, false, 'centripetal')
 
-    let previousDirection = new THREE.Vector3(0, 0, 1)
+    let previousDirection = pathData.length > 1 
+      ? pathData[1].position.clone().sub(pathData[0].position).normalize()
+      : new THREE.Vector3(0, 0, 1)
 
     const smoothStep = (t) => t * t * (3 - 2 * t)
     

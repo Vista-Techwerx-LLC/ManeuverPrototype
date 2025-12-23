@@ -242,9 +242,7 @@ export default function SteepTurn({ user }) {
       const newEntry = {
         hdg: data.hdg_true,
         alt: data.alt_ft,
-        spd: data.ias_kt,
-        lat: data.lat,
-        lon: data.lon
+        spd: data.ias_kt
       }
       setEntry(newEntry)
       setTracking({
@@ -411,10 +409,12 @@ export default function SteepTurn({ user }) {
         newTracking.lastSampleTime = now
       }
 
-      // Always track max deviations for display purposes
-      if (Math.abs(altDev) > Math.abs(newTracking.maxAltDev)) newTracking.maxAltDev = altDev
-      if (Math.abs(spdDev) > Math.abs(newTracking.maxSpdDev)) newTracking.maxSpdDev = spdDev
-      if (Math.abs(bankDev) > Math.abs(newTracking.maxBankDev)) newTracking.maxBankDev = bankDev
+      // Track max deviations only after turn is established
+      if (newTracking.turnEstablished) {
+        if (Math.abs(altDev) > Math.abs(newTracking.maxAltDev)) newTracking.maxAltDev = altDev
+        if (Math.abs(spdDev) > Math.abs(newTracking.maxSpdDev)) newTracking.maxSpdDev = spdDev
+        if (Math.abs(bankDev) > Math.abs(newTracking.maxBankDev)) newTracking.maxBankDev = bankDev
+      }
 
       // Only check for skill-level violations after turn is fully established
       if (newTracking.turnEstablished) {
@@ -598,16 +598,6 @@ export default function SteepTurn({ user }) {
   const spdPct = Math.min(Math.abs(spdDev) / passTolerances.airspeed, 1) * 50
   const bankPct = Math.min(Math.abs(bankDev) / 5, 1) * 50
 
-  const flightPathEntry = useMemo(() => {
-    if (!entry) return null
-    return {
-      lat: entry.lat,
-      lon: entry.lon,
-      altitude: entry.alt,
-      alt: entry.alt
-    }
-  }, [entry?.lat, entry?.lon, entry?.alt])
-
   const grade = tracking.grade
   const allPass = grade?.allPass ?? false
   const summary = grade ? (
@@ -620,6 +610,17 @@ export default function SteepTurn({ user }) {
           !grade.hdgPass && `rollout heading error > ${passTolerances.rolloutHeading}°`
         ].filter(Boolean).join(', ')
   ) : ''
+
+  const flightPathEntry = useMemo(() => {
+    if (!entry) return null
+    return {
+      heading: entry.hdg,
+      altitude: entry.alt,
+      airspeed: entry.spd,
+      lat: entry.lat,
+      lon: entry.lon
+    }
+  }, [entry?.hdg, entry?.alt, entry?.spd, entry?.lat, entry?.lon])
 
   return (
     <div className="steep-turn-page">
