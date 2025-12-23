@@ -43,7 +43,7 @@ export const AUTO_START_TOLERANCES = {
       passTolerances: {
         altitude: 200,
         airspeed: 20,
-        bank: { min: 35, max: 55 },
+        bank: { min: 25, max: 65 },
         rolloutHeading: 20
       }
     },
