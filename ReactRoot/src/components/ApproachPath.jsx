@@ -169,7 +169,14 @@ export default function ApproachPath({
         // Aircraft symbol
         ctx.save()
         ctx.translate(x, y)
-        ctx.rotate((aircraftData.hdg_true - runway.heading) * Math.PI / 180)
+        // The view is RUNWAY-RELATIVE: runway always points down toward threshold.
+        // Icon is drawn pointing UP (nose at -Y).
+        // When aligned with runway, icon should point DOWN (180°).
+        // Turn LEFT (heading decreases) → icon should point LEFT of down.
+        // Turn RIGHT (heading increases) → icon should point RIGHT of down.
+        const headingDiff = aircraftData.hdg_true - runway.heading
+        const rotationRad = (180 + headingDiff) * Math.PI / 180
+        ctx.rotate(-rotationRad)
         
         // Draw aircraft icon
         ctx.fillStyle = '#ffff00'
@@ -407,4 +414,3 @@ export default function ApproachPath({
     </div>
   )
 }
-
