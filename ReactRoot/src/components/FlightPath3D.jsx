@@ -157,6 +157,185 @@ export default function FlightPath3D({ flightPath, entry }) {
 
     if (pathPoints.length === 0) return
 
+    // Find entry point (where roll begins - bank starts increasing significantly)
+    let entryIndex = -1
+    const entryBankThreshold = 5
+    for (let i = 1; i < pathData.length; i++) {
+      const prevBank = Math.abs(pathData[i - 1].bank || 0)
+      const currBank = Math.abs(pathData[i].bank || 0)
+      // Entry is where bank increases from near-level to significant
+      if (prevBank < entryBankThreshold && currBank >= entryBankThreshold) {
+        entryIndex = i
+        break
+      }
+    }
+    // If no clear entry found, use first point with any bank
+    if (entryIndex === -1) {
+      for (let i = 0; i < pathData.length; i++) {
+        if (Math.abs(pathData[i].bank || 0) >= entryBankThreshold) {
+          entryIndex = i
+          break
+        }
+      }
+    }
+    // Fallback to first point
+    if (entryIndex === -1) entryIndex = 0
+
+    let rolloutStartIndex = -1
+    let rolloutEndIndex = -1
+    let maxBankIndex = 0
+    let maxBank = 0
+
+    for (let i = 0; i < pathData.length; i++) {
+      const b = Math.abs(pathData[i].bank || 0)
+      if (b > maxBank) {
+        maxBank = b
+        maxBankIndex = i
+      }
+    }
+
+    // Find rollout start: when bank decreases to 20-25 degrees after reaching max bank
+    // Rollout typically begins about half the bank angle before target heading
+    // For a 45° bank, that's about 22-30° before, which corresponds to ~20-25° bank
+    const rolloutStartBankMin = 20
+    const rolloutStartBankMax = 25
+    
+    for (let i = maxBankIndex + 1; i < pathData.length; i++) {
+      const curr = Math.abs(pathData[i].bank || 0)
+      // Rollout starts when bank is in the 20-25 degree range
+      if (curr >= rolloutStartBankMin && curr <= rolloutStartBankMax) {
+        rolloutStartIndex = i
+        break
+      }
+    }
+    
+    // If no point found in exact range, find closest point to 22.5 degrees (middle of range)
+    if (rolloutStartIndex === -1) {
+      let closestIndex = -1
+      let closestDiff = Infinity
+      for (let i = maxBankIndex + 1; i < pathData.length; i++) {
+        const curr = Math.abs(pathData[i].bank || 0)
+        const diff = Math.abs(curr - 22.5)
+        if (diff < closestDiff && curr < maxBank * 0.7) {
+          closestDiff = diff
+          closestIndex = i
+        }
+      }
+      if (closestIndex !== -1) {
+        rolloutStartIndex = closestIndex
+      }
+    }
+    
+    // Final fallback: use point where bank drops below 30 degrees
+    if (rolloutStartIndex === -1) {
+      for (let i = maxBankIndex + 1; i < pathData.length; i++) {
+        const curr = Math.abs(pathData[i].bank || 0)
+        if (curr <= 30) {
+          rolloutStartIndex = i
+          break
+        }
+      }
+    }
+    
+    // If still not found, use last point
+    if (rolloutStartIndex === -1) rolloutStartIndex = pathData.length - 1
+
+    // Find rollout end: when bank reaches level (≤ 5 degrees)
+    for (let i = rolloutStartIndex; i < pathData.length; i++) {
+      const curr = Math.abs(pathData[i].bank || 0)
+      if (curr <= 5) {
+        rolloutEndIndex = i
+        break
+      }
+    }
+    // If never reaches level, use last point
+    if (rolloutEndIndex === -1) rolloutEndIndex = pathData.length - 1
+
+    // Extract level flight segment (2-3 seconds before entry) if we have data
+    let levelFlightPoints = []
+    let levelFlightData = []
+    if (entryIndex > 0 && pathData[entryIndex]?.timestamp) {
+      const entryTime = pathData[entryIndex].timestamp
+      const lookbackTime = 2500
+      const lookbackStartTime = entryTime - lookbackTime
+
+      for (let i = 0; i < entryIndex; i++) {
+        if (pathData[i].timestamp >= lookbackStartTime) {
+          levelFlightPoints.push(pathPoints[i])
+          levelFlightData.push(pathData[i])
+        }
+      }
+    }
+
+    // Always create level flight segment from entry point (since flight path typically starts when turn is detected)
+    // This ensures we always show the level flight approach
+    // Create synthetic segment if we don't have enough real level flight data (less than 2 points)
+    if (pathPoints.length > 0 && levelFlightPoints.length < 2) {
+      const actualEntryPoint = entryIndex >= 0 && entryIndex < pathPoints.length 
+        ? pathPoints[entryIndex] 
+        : new THREE.Vector3(0, 0, 0)
+      
+      // Calculate direction the aircraft was traveling before the turn
+      // Use heading from entry point data, or calculate from path if available
+      let direction
+      const entryHeading = pathData[entryIndex]?.heading || entry?.heading || 0
+      const headingRad = (entryHeading * Math.PI) / 180
+      
+      // Create direction vector from heading (heading is direction of travel)
+      direction = new THREE.Vector3(
+        Math.sin(headingRad),
+        0,
+        Math.cos(headingRad)
+      ).normalize()
+      
+      // Validate direction is not zero
+      if (direction.length() < 0.1 || !isFinite(direction.x) || !isFinite(direction.z)) {
+        // Fallback: use direction from first path point if available
+        if (entryIndex > 0 && entryIndex < pathPoints.length) {
+          const prevPoint = pathPoints[entryIndex - 1]
+          const dirVec = actualEntryPoint.clone().sub(prevPoint)
+          if (dirVec.length() > 0.1) {
+            direction = dirVec.normalize()
+          } else {
+            direction = new THREE.Vector3(0, 0, 1)
+          }
+        } else if (pathPoints.length > 1) {
+          const dirVec = pathPoints[1].clone().sub(pathPoints[0])
+          if (dirVec.length() > 0.1) {
+            direction = dirVec.normalize()
+          } else {
+            direction = new THREE.Vector3(0, 0, 1)
+          }
+        } else {
+          // Last resort: use north
+          direction = new THREE.Vector3(0, 0, 1)
+        }
+      }
+      
+      // Create level flight segment extending backwards from entry point (2-3 seconds of flight)
+      // At typical training speeds (~100-120 kt), 2-3 seconds = ~170-340 feet (~50-100 meters)
+      // Using 140 meters (~460 feet) for a reasonable visual representation
+      const segmentLength = 140
+      
+      // Create points going backwards from entry point
+      const backPoint = actualEntryPoint.clone().sub(direction.clone().multiplyScalar(segmentLength))
+      const midPoint1 = actualEntryPoint.clone().sub(direction.clone().multiplyScalar(segmentLength * 0.66))
+      const midPoint2 = actualEntryPoint.clone().sub(direction.clone().multiplyScalar(segmentLength * 0.33))
+      
+      // Get heading from entry point data or entry
+      const levelFlightHeading = pathData[entryIndex]?.heading || entry?.heading || 0
+      const entryTimestamp = pathData[entryIndex]?.timestamp || pathData[0]?.timestamp || Date.now()
+      
+      // Always create the segment - points should be valid if direction is valid
+      levelFlightPoints = [backPoint, midPoint1, midPoint2, actualEntryPoint]
+      levelFlightData = [
+        { position: backPoint, alt: originAlt, heading: levelFlightHeading, bank: 0, airspeed: entry?.airspeed || 0, pitch: 0, timestamp: entryTimestamp - 3000 },
+        { position: midPoint1, alt: originAlt, heading: levelFlightHeading, bank: 0, airspeed: entry?.airspeed || 0, pitch: 0, timestamp: entryTimestamp - 2000 },
+        { position: midPoint2, alt: originAlt, heading: levelFlightHeading, bank: 0, airspeed: entry?.airspeed || 0, pitch: 0, timestamp: entryTimestamp - 1000 },
+        { position: actualEntryPoint, alt: originAlt, heading: levelFlightHeading, bank: 0, airspeed: entry?.airspeed || 0, pitch: 0, timestamp: entryTimestamp }
+      ]
+    }
+
     // Optimized path creation with reduced geometry complexity
     const getColorCategory = (altDev) => {
       const absDev = Math.abs(altDev)
@@ -176,6 +355,39 @@ export default function FlightPath3D({ flightPath, entry }) {
         default:
           return { color: 0x6ab0ff, emissive: 0x2a5a8a }
       }
+    }
+
+    // Create level flight segment (before turn)
+    let levelFlightGeometry = null
+    let levelFlightMaterial = null
+    if (levelFlightPoints && levelFlightPoints.length >= 2) {
+      try {
+        // Use LineCurve3 for a simple straight segment, or CatmullRomCurve3 with closed: false
+        let levelFlightCurve
+        if (levelFlightPoints.length === 2) {
+          // Simple line for 2 points
+          levelFlightCurve = new THREE.LineCurve3(levelFlightPoints[0], levelFlightPoints[1])
+        } else {
+          // CatmullRomCurve3 for smooth curve with multiple points, explicitly set closed: false
+          levelFlightCurve = new THREE.CatmullRomCurve3(levelFlightPoints, false, 'centripetal')
+        }
+        
+        // Limit the number of segments to prevent infinite extension
+        const segments = Math.min(Math.max(levelFlightPoints.length * 2, 8), 20)
+        levelFlightGeometry = new THREE.TubeGeometry(levelFlightCurve, segments, 14, 8, false)
+        levelFlightMaterial = new THREE.MeshStandardMaterial({
+          color: 0x00ffff,
+          emissive: 0x00ffff,
+          emissiveIntensity: 0.6,
+          metalness: 0.1,
+          roughness: 0.5,
+          transparent: true,
+          opacity: 0.9
+        })
+        const levelFlightSegment = new THREE.Mesh(levelFlightGeometry, levelFlightMaterial)
+        levelFlightSegment.castShadow = true
+        scene.add(levelFlightSegment)
+      } catch (error) {}
     }
 
     const pathGroup = new THREE.Group()
@@ -214,7 +426,16 @@ export default function FlightPath3D({ flightPath, entry }) {
       pathGroup.add(segment)
     }
 
+    // Convert rollout indices to sampled indices
+    const sampledRolloutStartIndex = Math.floor(rolloutStartIndex / sampleRate)
+    const sampledRolloutEndIndex = Math.floor(rolloutEndIndex / sampleRate)
+
     for (let i = 0; i < sampledData.length; i++) {
+      // Skip rollout portion - it will be shown as a separate magenta segment
+      if (i >= sampledRolloutStartIndex && i <= sampledRolloutEndIndex) {
+        continue
+      }
+
       const altDev = sampledData[i].alt - originAlt
       const category = getColorCategory(altDev)
 
@@ -344,36 +565,113 @@ export default function FlightPath3D({ flightPath, entry }) {
     scene.add(planeGroup)
     planeRef.current = planeGroup
 
-    const entryGeometry = new THREE.SphereGeometry(30, 32, 32)
+    const entryMarkerGroup = new THREE.Group()
+    
+    const entryGeometry = new THREE.SphereGeometry(35, 32, 32)
     const entryMaterial = new THREE.MeshStandardMaterial({ 
       color: 0x00ffff,
-      emissive: 0x004444,
-      emissiveIntensity: 0.5,
+      emissive: 0x00ffff,
+      emissiveIntensity: 0.8,
       metalness: 0.4,
       roughness: 0.3,
       transparent: true,
       opacity: 0.95
     })
     const entryMarker = new THREE.Mesh(entryGeometry, entryMaterial)
-    entryMarker.position.set(0, 0, 0)
     entryMarker.castShadow = true
-    scene.add(entryMarker)
+    entryMarkerGroup.add(entryMarker)
+    
+    const entryRingGeometry = new THREE.TorusGeometry(45, 3, 16, 32)
+    const entryRingMaterial = new THREE.MeshStandardMaterial({
+      color: 0x00ffff,
+      emissive: 0x00ffff,
+      emissiveIntensity: 0.6,
+      metalness: 0.5,
+      roughness: 0.3,
+      transparent: true,
+      opacity: 0.7
+    })
+    const entryRing = new THREE.Mesh(entryRingGeometry, entryRingMaterial)
+    entryRing.rotation.x = Math.PI / 2
+    entryRing.castShadow = true
+    entryMarkerGroup.add(entryRing)
+    
+    // Position entry marker at actual entry point (where roll begins)
+    const entryPoint = entryIndex >= 0 && entryIndex < pathPoints.length 
+      ? pathPoints[entryIndex] 
+      : new THREE.Vector3(0, 0, 0)
+    entryMarkerGroup.position.copy(entryPoint)
+    scene.add(entryMarkerGroup)
 
-    const lastPoint = pathPoints[pathPoints.length - 1]
-    const exitGeometry = new THREE.SphereGeometry(30, 32, 32)
-    const exitMaterial = new THREE.MeshStandardMaterial({ 
+    let rolloutPoints = []
+    let rolloutGeometry = null
+    let rolloutMaterial = null
+
+    if (rolloutStartIndex < rolloutEndIndex) {
+      for (let i = rolloutStartIndex; i <= rolloutEndIndex && i < pathPoints.length; i++) {
+        rolloutPoints.push(pathPoints[i])
+      }
+    }
+
+    if (rolloutPoints.length >= 2) {
+      const rolloutCurve = new THREE.CatmullRomCurve3(rolloutPoints, false, 'centripetal')
+      rolloutGeometry = new THREE.TubeGeometry(rolloutCurve, Math.max(rolloutPoints.length * 2, 10), 14, 8, false)
+      rolloutMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff00ff,
+        emissive: 0xff00ff,
+        emissiveIntensity: 0.5,
+        metalness: 0.1,
+        roughness: 0.5,
+        transparent: true,
+        opacity: 0.8
+      })
+      const rolloutSegment = new THREE.Mesh(rolloutGeometry, rolloutMaterial)
+      rolloutSegment.castShadow = true
+      scene.add(rolloutSegment)
+    }
+
+    // Rollout start marker (where opposite roll begins)
+    const rolloutStartPoint = rolloutStartIndex >= 0 && rolloutStartIndex < pathPoints.length
+      ? pathPoints[rolloutStartIndex]
+      : pathPoints[pathPoints.length - 1]
+    
+    const rolloutStartGeometry = new THREE.SphereGeometry(32, 32, 32)
+    const rolloutStartMaterial = new THREE.MeshStandardMaterial({ 
       color: 0xff00ff,
-      emissive: 0x440044,
-      emissiveIntensity: 0.5,
+      emissive: 0xff00ff,
+      emissiveIntensity: 0.7,
       metalness: 0.4,
       roughness: 0.3,
       transparent: true,
       opacity: 0.95
     })
+    const rolloutStartMarker = new THREE.Mesh(rolloutStartGeometry, rolloutStartMaterial)
+    rolloutStartMarker.position.copy(rolloutStartPoint)
+    rolloutStartMarker.castShadow = true
+    scene.add(rolloutStartMarker)
+
+    // Exit/completion marker (final point)
+    const lastPoint = rolloutEndIndex >= 0 && rolloutEndIndex < pathPoints.length
+      ? pathPoints[rolloutEndIndex]
+      : pathPoints[pathPoints.length - 1]
+    const exitGeometry = new THREE.SphereGeometry(30, 32, 32)
+    const exitMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x888888,
+      emissive: 0x222222,
+      emissiveIntensity: 0.3,
+      metalness: 0.4,
+      roughness: 0.3,
+      transparent: true,
+      opacity: 0.8
+    })
     const exitMarker = new THREE.Mesh(exitGeometry, exitMaterial)
     exitMarker.position.copy(lastPoint)
     exitMarker.castShadow = true
     scene.add(exitMarker)
+
+    // Calculate center of flight path for positioning grid and camera
+    const box = new THREE.Box3().setFromPoints(pathPoints)
+    const center = box.getCenter(new THREE.Vector3())
 
     // Reference plane
     const planeSize = Math.max(
@@ -392,18 +690,16 @@ export default function FlightPath3D({ flightPath, entry }) {
     })
     const referencePlane = new THREE.Mesh(planeGeometry, planeMaterial)
     referencePlane.rotation.x = -Math.PI / 2
-    referencePlane.position.y = 0
+    referencePlane.position.set(center.x, 0, center.z)
     referencePlane.receiveShadow = true
     scene.add(referencePlane)
 
-    // Grid - brighter
+    // Grid - brighter, centered on flight path
     const gridHelper = new THREE.GridHelper(planeSize, 20, 0x666666, 0x444444)
-    gridHelper.position.y = 0
+    gridHelper.position.set(center.x, 0, center.z)
     scene.add(gridHelper)
 
     // Position camera
-    const box = new THREE.Box3().setFromPoints(pathPoints)
-    const center = box.getCenter(new THREE.Vector3())
     const size = box.getSize(new THREE.Vector3())
     const maxDim = Math.max(size.x, size.y, size.z)
     const distance = maxDim * 2.5
@@ -667,18 +963,26 @@ export default function FlightPath3D({ flightPath, entry }) {
 
     const geometriesToDispose = [
       entryGeometry,
+      entryRingGeometry,
+      rolloutStartGeometry,
       exitGeometry,
       planeGeometry,
+      levelFlightGeometry,
+      rolloutGeometry,
       ...pointSpheres.map(s => s.geometry),
       ...pathGroupGeometries
-    ]
+    ].filter(Boolean)
     const materialsToDispose = [
       entryMaterial,
+      entryRingMaterial,
+      rolloutStartMaterial,
       exitMaterial,
       planeMaterial,
+      levelFlightMaterial,
+      rolloutMaterial,
       ...pointSpheres.map(s => s.material),
       ...pathGroupMaterials
-    ]
+    ].filter(Boolean)
 
     // Cleanup
     return () => {
@@ -817,11 +1121,23 @@ export default function FlightPath3D({ flightPath, entry }) {
         <div className="flight-path-3d-legend">
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#00ffff' }}></span>
-            <span>Entry Point</span>
+            <span>Level Flight (Before Entry)</span>
+          </div>
+          <div className="legend-item">
+            <span className="legend-color" style={{ background: '#00ffff', borderRadius: '50%' }}></span>
+            <span>Entry Point (Roll Begins)</span>
           </div>
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#ff00ff' }}></span>
-            <span>Exit Point</span>
+            <span>Rollout Segment</span>
+          </div>
+          <div className="legend-item">
+            <span className="legend-color" style={{ background: '#ff00ff', borderRadius: '50%' }}></span>
+            <span>Rollout Start (Opposite Roll Begins)</span>
+          </div>
+          <div className="legend-item">
+            <span className="legend-color" style={{ background: '#888888', borderRadius: '50%' }}></span>
+            <span>Completion Point</span>
           </div>
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#00ff00' }}></span>

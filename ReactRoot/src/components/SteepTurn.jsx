@@ -57,6 +57,8 @@ export default function SteepTurn({ user }) {
   const { connected, data } = useWebSocket(user.id)
   const [state, setState] = useState('disconnected')
   const [entry, setEntry] = useState(null)
+  const rolloutStartTimeRef = useRef(null)
+  const rolloutLevelStartRef = useRef(null)
   const [tracking, setTracking] = useState({
     turnDirection: null,
     totalTurn: 0,
@@ -269,7 +271,7 @@ export default function SteepTurn({ user }) {
 
   // Update tracking when in tracking state
   useEffect(() => {
-    if (!data || state !== 'tracking' || !entry) return
+    if (!data || (state !== 'tracking' && state !== 'rollout') || !entry) return
 
     const hdg = data.hdg_true
     const alt = data.alt_ft
@@ -281,6 +283,7 @@ export default function SteepTurn({ user }) {
     const establishmentThreshold = getSteepTurnEstablishmentThreshold(autoStartSkillLevel)
     const passTolerances = getSteepTurnPassTolerances(autoStartSkillLevel)
     const bankAbs = Math.abs(bank)
+    const now = Date.now()
 
     // Track when bank reaches 25 degrees
     if (bankAbs >= 25) {
@@ -357,13 +360,12 @@ export default function SteepTurn({ user }) {
         }
       }
 
-      // Determine turn direction
       if (newTracking.turnDirection === null && bankAbs > 20) {
         newTracking.turnDirection = bank > 0 ? 'right' : 'left'
       }
 
       // Calculate turn progress
-      if (newTracking.turnDirection && newTracking.lastHdg != null) {
+      if (state === 'tracking' && newTracking.turnDirection && newTracking.lastHdg != null && newTracking.totalTurn < 360) {
         let delta = hdg - newTracking.lastHdg
         delta = normalizeAngle(delta)
 
@@ -371,6 +373,15 @@ export default function SteepTurn({ user }) {
           newTracking.totalTurn += delta
         } else if (newTracking.turnDirection === 'left' && delta < 0) {
           newTracking.totalTurn += Math.abs(delta)
+        }
+
+        if (newTracking.totalTurn >= 360) {
+          newTracking.totalTurn = 360
+          if (rolloutStartTimeRef.current === null) {
+            rolloutStartTimeRef.current = now
+            rolloutLevelStartRef.current = null
+            setTimeout(() => setState('rollout'), 0)
+          }
         }
       }
       newTracking.lastHdg = hdg
@@ -393,7 +404,6 @@ export default function SteepTurn({ user }) {
       }
 
       // Capture flight path data (sample every ~0.5 seconds to avoid too much data)
-      const now = Date.now()
       const lastSampleTime = newTracking.lastSampleTime || 0
       if (now - lastSampleTime >= 500 || newTracking.flightPath.length === 0) {
         newTracking.flightPath.push({
@@ -409,10 +419,12 @@ export default function SteepTurn({ user }) {
         newTracking.lastSampleTime = now
       }
 
-      // Track max deviations only after turn is established
+      // Track max deviations for altitude and airspeed from the start
+      if (Math.abs(altDev) > Math.abs(newTracking.maxAltDev)) newTracking.maxAltDev = altDev
+      if (Math.abs(spdDev) > Math.abs(newTracking.maxSpdDev)) newTracking.maxSpdDev = spdDev
+      
+      // Only track max bank deviation after turn is established
       if (newTracking.turnEstablished) {
-        if (Math.abs(altDev) > Math.abs(newTracking.maxAltDev)) newTracking.maxAltDev = altDev
-        if (Math.abs(spdDev) > Math.abs(newTracking.maxSpdDev)) newTracking.maxSpdDev = spdDev
         if (Math.abs(bankDev) > Math.abs(newTracking.maxBankDev)) newTracking.maxBankDev = bankDev
       }
 
@@ -423,16 +435,21 @@ export default function SteepTurn({ user }) {
         if (bankAbs < passTolerances.bank.min || bankAbs > passTolerances.bank.max) newTracking.busted.bank = true
       }
 
-      // Check for completion
-      if (newTracking.totalTurn >= 360) {
-        const hdgErr = Math.abs(normalizeAngle(hdg - entry.hdg))
-        const passTolerancesForCompletion = passTolerances
-        setTimeout(() => {
-          setState('complete')
-          const hdgPass = hdgErr <= passTolerancesForCompletion.rolloutHeading
+      if (state === 'rollout' && rolloutStartTimeRef.current != null) {
+        if (bankAbs <= 5) {
+          if (rolloutLevelStartRef.current == null) rolloutLevelStartRef.current = now
+        } else {
+          rolloutLevelStartRef.current = null
+        }
+
+        const elapsed = now - rolloutStartTimeRef.current
+        const levelElapsed = rolloutLevelStartRef.current ? now - rolloutLevelStartRef.current : 0
+
+        if (elapsed >= 6000 || levelElapsed >= 1200) {
+          const hdgErr = Math.abs(normalizeAngle(hdg - entry.hdg))
+          const hdgPass = hdgErr <= passTolerances.rolloutHeading
           const allPass = !newTracking.busted.alt && !newTracking.busted.spd && !newTracking.busted.bank && hdgPass
-          
-          // Calculate averages
+
           const avgBank = newTracking.samples.bank.length > 0
             ? newTracking.samples.bank.reduce((a, b) => a + b, 0) / newTracking.samples.bank.length
             : 0
@@ -442,7 +459,7 @@ export default function SteepTurn({ user }) {
           const avgSpd = newTracking.samples.spd.length > 0
             ? newTracking.samples.spd.reduce((a, b) => a + b, 0) / newTracking.samples.spd.length
             : 0
-          
+
           const gradeData = { 
             allPass, 
             hdgErr, 
@@ -455,15 +472,18 @@ export default function SteepTurn({ user }) {
               spdDev: avgSpd - entry.spd
             }
           }
-          
-          setTracking(prev => ({ ...prev, grade: gradeData }))
-          
-          // Save to database (only once)
-          if (!hasBeenSaved.current) {
-            hasBeenSaved.current = true
-            saveManeuver(allPass, hdgErr, newTracking, avgBank, avgAlt, avgSpd)
-          }
-        }, 0)
+
+          setTimeout(() => {
+            setState('complete')
+            setTracking(prev2 => ({ ...prev2, grade: gradeData }))
+            if (!hasBeenSaved.current) {
+              hasBeenSaved.current = true
+              saveManeuver(allPass, hdgErr, newTracking, avgBank, avgAlt, avgSpd)
+            }
+            rolloutStartTimeRef.current = null
+            rolloutLevelStartRef.current = null
+          }, 0)
+        }
       }
 
       return newTracking
@@ -473,6 +493,8 @@ export default function SteepTurn({ user }) {
   function cancelTracking() {
     setEntry(null)
     setState('ready')
+    rolloutStartTimeRef.current = null
+    rolloutLevelStartRef.current = null
     setTracking({
       turnDirection: null,
       totalTurn: 0,
@@ -503,6 +525,8 @@ export default function SteepTurn({ user }) {
   function reset() {
     setEntry(null)
     setState('ready')
+    rolloutStartTimeRef.current = null
+    rolloutLevelStartRef.current = null
     setTracking({
       turnDirection: null,
       totalTurn: 0,
@@ -635,7 +659,7 @@ export default function SteepTurn({ user }) {
               <div className={`status-badge ${state}`}>
                 ● {state === 'disconnected' ? 'Disconnected' : 
                    state === 'ready' ? 'Ready' : 
-                   state === 'tracking' ? 'Tracking Turn' : 'Complete'}
+                   (state === 'tracking' || state === 'rollout') ? 'Tracking Turn' : 'Complete'}
               </div>
 
               <button
@@ -643,7 +667,7 @@ export default function SteepTurn({ user }) {
                 disabled={state === 'disconnected' || state === 'complete'}
                 onClick={handleStartClick}
               >
-                {state === 'tracking' ? 'Cancel' : 'Start Tracking'}
+                {(state === 'tracking' || state === 'rollout') ? 'Cancel' : 'Start Tracking'}
               </button>
 
               <AutoStart
@@ -720,7 +744,7 @@ export default function SteepTurn({ user }) {
           </div>
 
           <div className="right-col">
-            {state === 'tracking' && (
+            {(state === 'tracking' || state === 'rollout') && (
               <div className="card">
                 <h2>Turn Progress</h2>
 
