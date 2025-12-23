@@ -64,6 +64,12 @@ export default function Navbar({ user }) {
             Slow Flight
           </Link>
           <Link 
+            to="/landing" 
+            className={isActive('/landing') ? 'active' : ''}
+          >
+            Landing
+          </Link>
+          <Link 
             to="/history" 
             className={isActive('/history') ? 'active' : ''}
           >

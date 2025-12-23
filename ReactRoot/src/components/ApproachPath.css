@@ -1,0 +1,31 @@
+.approach-path {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.view-container {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.view-header {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #4a9eff;
+  margin-bottom: 8px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.path-canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 6px;
+}
+

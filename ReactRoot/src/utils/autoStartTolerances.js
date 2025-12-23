@@ -7,7 +7,8 @@ export const SKILL_LEVELS = {
 
 export const MANEUVER_TYPES = {
   STEEP_TURN: 'steep_turn',
-  SLOW_FLIGHT: 'slow_flight'
+  SLOW_FLIGHT: 'slow_flight',
+  LANDING: 'landing'
 }
 
 const STEEP_TURN_ACS_STANDARDS = {

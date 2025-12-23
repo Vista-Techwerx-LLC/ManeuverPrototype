@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard'
 import Telemetry from './components/Telemetry'
 import SteepTurn from './components/SteepTurn'
 import SlowFlight from './components/SlowFlight'
+import Landing from './components/Landing'
 import History from './components/History'
 import Friends from './components/Friends'
 import ViewStudent from './components/ViewStudent'
@@ -152,6 +153,10 @@ function App() {
           <Route 
             path="/slow-flight" 
             element={user ? <SlowFlight user={user} /> : <Navigate to="/auth" />} 
+          />
+          <Route 
+            path="/landing" 
+            element={user ? <Landing user={user} /> : <Navigate to="/auth" />} 
           />
           <Route 
             path="/history" 

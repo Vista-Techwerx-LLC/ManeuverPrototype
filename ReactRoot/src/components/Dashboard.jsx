@@ -102,6 +102,13 @@ export default function Dashboard({ user }) {
                   <p>Practice slow flight</p>
                 </div>
               </Link>
+              <Link to="/landing" className="quick-link">
+                <span className="icon">🛬</span>
+                <div>
+                  <strong>Landing Tracker</strong>
+                  <p>JKA approach & landing</p>
+                </div>
+              </Link>
               <Link to="/history" className="quick-link">
                 <span className="icon">📚</span>
                 <div>
