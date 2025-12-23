@@ -103,71 +103,103 @@ export default function ApproachPath({
       ctx.setLineDash([])
     }
     
-    // Draw flight path
-    if (flightPath.length > 1) {
-      ctx.strokeStyle = '#00ff88'
-      ctx.lineWidth = 2
-      ctx.beginPath()
+    // Draw flight path (only if airborne and has actual data)
+    // Only show path when reasonably close to runway (< 5 NM)
+    if (flightPath && flightPath.length > 3) {
+      const validPoints = []
       
-      flightPath.forEach((point, idx) => {
+      // Filter and validate points
+      flightPath.forEach((point) => {
         const dist = calculateDistance(
           point.lat, point.lon,
           runway.threshold.lat, runway.threshold.lon
         )
-        const lateralDev = calculateLateralDeviation(
-          point.lat, point.lon,
-          runway.threshold.lat, runway.threshold.lon,
-          runway.oppositeEnd.lat, runway.oppositeEnd.lon
-        )
         
-        const x = lateralDev * scale
-        const y = -dist * scale
-        
-        if (idx === 0) {
-          ctx.moveTo(x, y)
-        } else {
-          ctx.lineTo(x, y)
+        // Only include points within 5 NM of threshold
+        if (dist <= 5) {
+          const lateralDev = calculateLateralDeviation(
+            point.lat, point.lon,
+            runway.threshold.lat, runway.threshold.lon,
+            runway.oppositeEnd.lat, runway.oppositeEnd.lon
+          )
+          
+          // Only include points within reasonable lateral range (±2 NM)
+          if (Math.abs(lateralDev) <= 2) {
+            validPoints.push({
+              x: lateralDev * scale,
+              y: -dist * scale,
+              dist,
+              lateralDev
+            })
+          }
         }
       })
-      ctx.stroke()
+      
+      // Only draw if we have enough valid points
+      if (validPoints.length > 3) {
+        ctx.strokeStyle = '#00ff88'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        
+        validPoints.forEach((pt, idx) => {
+          if (idx === 0) {
+            ctx.moveTo(pt.x, pt.y)
+          } else {
+            ctx.lineTo(pt.x, pt.y)
+          }
+        })
+        
+        ctx.stroke()
+      }
     }
     
-    // Draw aircraft position
-    if (aircraftData && distanceToThreshold != null) {
+    // Draw aircraft position (only if within reasonable range)
+    if (aircraftData && distanceToThreshold != null && distanceToThreshold <= 5) {
       const lateralDev = calculateLateralDeviation(
         aircraftData.lat, aircraftData.lon,
         runway.threshold.lat, runway.threshold.lon,
         runway.oppositeEnd.lat, runway.oppositeEnd.lon
       )
       
-      const x = lateralDev * scale
-      const y = -distanceToThreshold * scale
-      
-      // Aircraft symbol
-      ctx.save()
-      ctx.translate(x, y)
-      ctx.rotate((aircraftData.hdg_true - runway.heading) * Math.PI / 180)
-      
-      // Draw aircraft icon
-      ctx.fillStyle = '#ffff00'
-      ctx.beginPath()
-      ctx.moveTo(0, -8)
-      ctx.lineTo(-6, 6)
-      ctx.lineTo(0, 3)
-      ctx.lineTo(6, 6)
-      ctx.closePath()
-      ctx.fill()
-      
-      ctx.strokeStyle = '#000'
-      ctx.lineWidth = 1
-      ctx.stroke()
-      
-      ctx.restore()
-      
-      // Distance label
-      ctx.fillStyle = '#ffff00'
-      ctx.font = '12px monospace'
-      ctx.fillText(`${distanceToThreshold.toFixed(1)} NM`, x + 10, y - 10)
+      // Only show if within reasonable lateral range
+      if (Math.abs(lateralDev) <= 2) {
+        const x = lateralDev * scale
+        const y = -distanceToThreshold * scale
+        
+        // Aircraft symbol
+        ctx.save()
+        ctx.translate(x, y)
+        ctx.rotate((aircraftData.hdg_true - runway.heading) * Math.PI / 180)
+        
+        // Draw aircraft icon
+        ctx.fillStyle = '#ffff00'
+        ctx.beginPath()
+        ctx.moveTo(0, -8)
+        ctx.lineTo(-6, 6)
+        ctx.lineTo(0, 3)
+        ctx.lineTo(6, 6)
+        ctx.closePath()
+        ctx.fill()
+        
+        ctx.strokeStyle = '#000'
+        ctx.lineWidth = 1
+        ctx.stroke()
+        
+        ctx.restore()
+        
+        // Distance label
+        ctx.fillStyle = '#ffff00'
+        ctx.font = '12px monospace'
+        ctx.fillText(`${distanceToThreshold.toFixed(1)} NM`, x + 10, y - 10)
+        
+        // Lateral deviation label (if significant)
+        if (Math.abs(lateralDev) > 0.01) {
+          ctx.fillStyle = '#ffaa00'
+          ctx.font = '10px monospace'
+          const devFeet = Math.round(lateralDev * 6076)
+          ctx.fillText(`${devFeet > 0 ? '+' : ''}${devFeet} ft`, x + 10, y + 5)
+        }
+      }
     }
     
     ctx.restore()
@@ -259,12 +291,13 @@ export default function ApproachPath({
       ctx.fillText(gateName, x - 20, y - 10)
     })
     
-    // Draw flight path
-    if (flightPath.length > 1) {
+    // Draw flight path (only if airborne and has actual data)
+    if (flightPath && flightPath.length > 3) {
       ctx.strokeStyle = '#00ff88'
       ctx.lineWidth = 2
       ctx.beginPath()
       
+      let pathDrawn = false
       flightPath.forEach((point, idx) => {
         const dist = calculateDistance(
           point.lat, point.lon,
@@ -274,13 +307,20 @@ export default function ApproachPath({
         const x = centerX - (dist * scale)
         const y = baselineY - (point.alt * altScale)
         
-        if (idx === 0) {
-          ctx.moveTo(x, y)
-        } else {
-          ctx.lineTo(x, y)
+        // Only draw points within reasonable range
+        if (x >= 0 && x <= width && y >= 0 && y <= height) {
+          if (idx === 0 || !pathDrawn) {
+            ctx.moveTo(x, y)
+            pathDrawn = true
+          } else {
+            ctx.lineTo(x, y)
+          }
         }
       })
-      ctx.stroke()
+      
+      if (pathDrawn) {
+        ctx.stroke()
+      }
     }
     
     // Draw aircraft position

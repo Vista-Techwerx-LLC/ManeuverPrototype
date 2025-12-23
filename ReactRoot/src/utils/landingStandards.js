@@ -57,22 +57,28 @@ export function normalizeAngle(angle) {
 }
 
 // Calculate lateral deviation from centerline (in NM)
-export function calculateLateralDeviation(aircraftLat, aircraftLon, centerlineLat1, centerlineLon1, centerlineLat2, centerlineLon2) {
-  // Using cross-track distance formula
-  const R = 6371 * 0.539957 // Earth's radius in nautical miles
+// Returns positive for right of centerline, negative for left
+export function calculateLateralDeviation(aircraftLat, aircraftLon, thresholdLat, thresholdLon, oppositeEndLat, oppositeEndLon) {
+  // Calculate runway heading (from threshold to opposite end)
+  const runwayBearing = calculateBearing(thresholdLat, thresholdLon, oppositeEndLat, oppositeEndLon)
   
-  const dLat13 = (aircraftLat - centerlineLat1) * Math.PI / 180
-  const dLon13 = (aircraftLon - centerlineLon1) * Math.PI / 180
-  const lat1 = centerlineLat1 * Math.PI / 180
-  const lat3 = aircraftLat * Math.PI / 180
+  // Calculate bearing from threshold to aircraft
+  const aircraftBearing = calculateBearing(thresholdLat, thresholdLon, aircraftLat, aircraftLon)
   
-  const bearing13 = calculateBearing(centerlineLat1, centerlineLon1, aircraftLat, aircraftLon) * Math.PI / 180
-  const bearing12 = calculateBearing(centerlineLat1, centerlineLon1, centerlineLat2, centerlineLon2) * Math.PI / 180
+  // Calculate distance from threshold to aircraft
+  const distanceToAircraft = calculateDistance(thresholdLat, thresholdLon, aircraftLat, aircraftLon)
   
-  const d13 = calculateDistance(centerlineLat1, centerlineLon1, aircraftLat, aircraftLon)
-  const crossTrack = Math.asin(Math.sin(d13 / R) * Math.sin(bearing13 - bearing12)) * R
+  // Calculate the angle difference
+  let angleDiff = normalizeAngle(aircraftBearing - runwayBearing)
   
-  return crossTrack
+  // Convert angle to radians
+  const angleRad = angleDiff * Math.PI / 180
+  
+  // Lateral deviation = distance * sin(angle)
+  // Positive = right of centerline, Negative = left of centerline
+  const lateralDev = distanceToAircraft * Math.sin(angleRad)
+  
+  return lateralDev
 }
 
 // KJKA Airport Definition (Jack Edwards Airport, Gulf Shores, Alabama)
@@ -83,19 +89,20 @@ export const JKA_AIRPORT = {
   elevation: 17, // ft MSL
   patternAltitude: 1017, // ft MSL (prop aircraft)
   
-  // Runway 25 (primary for this implementation)
-  runway25: {
-    heading: 245, // magnetic heading
+  // Runway 27 (primary runway - 09/27)
+  // Runway 27 heading is 270° (West), so threshold is at the WESTERN end
+  runway27: {
+    heading: 270, // magnetic heading (west)
     threshold: {
-      lat: 30.2899, // KJKA Runway 25 threshold
-      lon: -87.6720,
+      lat: 30.2958, // KJKA Runway 27 threshold (WESTERN end - more west)
+      lon: -87.6875,
       elevation: 17 // ft MSL
     },
-    length: 6491, // feet
-    width: 100, // feet
+    length: 6969, // feet
+    width: 98, // feet
     oppositeEnd: {
-      lat: 30.2958,
-      lon: -87.6875
+      lat: 30.2899, // Runway 09 end (EASTERN end)
+      lon: -87.6720
     }
   }
 }

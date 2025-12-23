@@ -1,0 +1,226 @@
+.runway-calibration {
+  padding: 20px;
+}
+
+.calibration-container {
+  max-width: 600px;
+  margin: 0 auto;
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 24px;
+}
+
+.calibration-container h2 {
+  margin: 0 0 8px 0;
+  font-size: 1.8rem;
+  color: #fff;
+}
+
+.calibration-container .subtitle {
+  color: #aaa;
+  margin-bottom: 24px;
+  font-size: 0.95rem;
+}
+
+.calibration-step {
+  margin-top: 20px;
+}
+
+.calibration-step h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.3rem;
+  color: #4a9eff;
+}
+
+.instructions-list {
+  margin: 16px 0;
+  padding-left: 24px;
+  color: #ccc;
+  line-height: 1.8;
+}
+
+.instructions-list li {
+  margin: 8px 0;
+}
+
+.input-group {
+  margin: 16px 0;
+}
+
+.input-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: #ccc;
+  font-size: 0.9rem;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 1rem;
+  box-sizing: border-box;
+}
+
+.input-group input:focus {
+  outline: none;
+  border-color: #4a9eff;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.button-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.btn-primary {
+  flex: 1;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #00ff88 0%, #00d4aa 100%);
+  color: #0a0e27;
+  border: none;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 255, 136, 0.4);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  flex: 1;
+  padding: 12px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.btn-cancel {
+  flex: 1;
+  padding: 12px 24px;
+  background: rgba(255, 68, 68, 0.2);
+  color: #ff8888;
+  border: 1px solid rgba(255, 68, 68, 0.5);
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-cancel:hover {
+  background: rgba(255, 68, 68, 0.3);
+  border-color: rgba(255, 68, 68, 0.7);
+  color: #ffaaaa;
+}
+
+.instruction-text {
+  color: #ccc;
+  line-height: 1.6;
+  margin: 16px 0;
+}
+
+.position-display {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.position-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.position-item:last-child {
+  border-bottom: none;
+}
+
+.position-item .label {
+  color: #aaa;
+  font-size: 0.9rem;
+}
+
+.position-item .value {
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+}
+
+.runway-summary {
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 16px 0;
+}
+
+.summary-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.summary-item:last-child {
+  border-bottom: none;
+}
+
+.summary-item .label {
+  color: #aaa;
+  font-size: 0.9rem;
+}
+
+.summary-item .value {
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  text-align: right;
+}
+
+.message-box {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: rgba(74, 158, 255, 0.2);
+  border: 1px solid rgba(74, 158, 255, 0.5);
+  border-radius: 6px;
+  color: #7db4ff;
+  font-size: 0.9rem;
+}
+
+.warning-box {
+  margin-top: 16px;
+  padding: 12px 16px;
+  background: rgba(255, 136, 68, 0.2);
+  border: 1px solid rgba(255, 136, 68, 0.5);
+  border-radius: 6px;
+  color: #ffaa77;
+  font-size: 0.9rem;
+}
+

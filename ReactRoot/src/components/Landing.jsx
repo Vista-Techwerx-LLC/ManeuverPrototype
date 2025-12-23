@@ -14,7 +14,7 @@ import {
   normalizeAngle
 } from '../utils/landingStandards'
 import ApproachPath from './ApproachPath'
-import FirstPersonApproachView from './FirstPersonApproachView'
+import RunwayCalibration, { loadCustomRunways } from './RunwayCalibration'
 import './Landing.css'
 
 const saveInProgress = new Set()
@@ -62,7 +62,9 @@ export default function Landing({ user }) {
   const [currentPhase, setCurrentPhase] = useState(LANDING_PHASES.NONE)
   const [phaseHistory, setPhaseHistory] = useState([])
   const [vref, setVref] = useState(60) // Default Vref, user can adjust
-  const [selectedRunway, setSelectedRunway] = useState('25') // JKA Runway 25
+  const [selectedRunway, setSelectedRunway] = useState('27') // KJKA Runway 27
+  const [customRunways, setCustomRunways] = useState([])
+  const [showCalibration, setShowCalibration] = useState(false)
   const [flightPath, setFlightPath] = useState([])
   const [phaseMetrics, setPhaseMetrics] = useState({})
   const [gatesPassed, setGatesPassed] = useState([])
@@ -73,10 +75,30 @@ export default function Landing({ user }) {
   const lastGateCheck = useRef({})
   const touchdownData = useRef(null)
 
+  // Load custom runways on mount
+  useEffect(() => {
+    const loaded = loadCustomRunways()
+    setCustomRunways(loaded)
+  }, [])
+
   const runway = useMemo(() => {
-    if (selectedRunway === '25') return JKA_AIRPORT.runway25
+    // Check if selected runway is a custom runway
+    if (selectedRunway.startsWith('custom_')) {
+      const custom = customRunways.find(r => r.id === selectedRunway)
+      if (custom) {
+        return {
+          heading: custom.heading,
+          threshold: custom.threshold,
+          oppositeEnd: custom.oppositeEnd,
+          length: custom.length,
+          width: custom.width || 100
+        }
+      }
+    }
+    // Default to KJKA Runway 27
+    if (selectedRunway === '27') return JKA_AIRPORT.runway27
     return null
-  }, [selectedRunway])
+  }, [selectedRunway, customRunways])
 
   // Update state based on connection
   useEffect(() => {
@@ -182,22 +204,27 @@ export default function Landing({ user }) {
       }, 2000)
     }
 
-    // Capture flight path (sample every ~0.5 seconds)
-    const now = Date.now()
-    const lastSample = flightPath[flightPath.length - 1]
-    if (!lastSample || now - lastSample.timestamp >= 500) {
-      setFlightPath(prev => [...prev, {
-        timestamp: now,
-        lat: data.lat,
-        lon: data.lon,
-        alt: data.alt_ft,
-        heading: data.hdg_true,
-        bank: data.bank_deg || 0,
-        airspeed: data.ias_kt,
-        pitch: data.pitch_deg || 0,
-        phase: phase,
-        vs_fpm: data.vs_fpm
-      }])
+    // Capture flight path (sample every ~0.5 seconds, only when airborne and moving)
+    const isAirborne = !data.on_ground
+    const isMoving = (data.ias_kt || 0) > 30 // Only record when moving faster than 30 knots
+    
+    if (isAirborne && isMoving) {
+      const now = Date.now()
+      const lastSample = flightPath[flightPath.length - 1]
+      if (!lastSample || now - lastSample.timestamp >= 500) {
+        setFlightPath(prev => [...prev, {
+          timestamp: now,
+          lat: data.lat,
+          lon: data.lon,
+          alt: data.alt_ft,
+          heading: data.hdg_true,
+          bank: data.bank_deg || 0,
+          airspeed: data.ias_kt,
+          pitch: data.pitch_deg || 0,
+          phase: phase,
+          vs_fpm: data.vs_fpm
+        }])
+      }
     }
   }, [data, connected, tracking, runway, currentPhase, vref, state])
 
@@ -285,6 +312,15 @@ export default function Landing({ user }) {
     touchdownData.current = null
   }
 
+  function handleCalibrationComplete(newRunway) {
+    // Reload custom runways
+    const loaded = loadCustomRunways()
+    setCustomRunways(loaded)
+    // Select the newly created runway
+    setSelectedRunway(newRunway.id)
+    setShowCalibration(false)
+  }
+
   // Calculate current metrics
   const distanceToThreshold = runway && data?.lat && data?.lon
     ? calculateDistance(data.lat, data.lon, runway.threshold.lat, runway.threshold.lon)
@@ -312,11 +348,30 @@ export default function Landing({ user }) {
   const phaseStandards = PHASE_STANDARDS[currentPhase]
   const currentCompliance = phaseMetrics[currentPhase]
 
+  if (showCalibration) {
+    return (
+      <div className="landing-page">
+        <div className="landing-container">
+          <RunwayCalibration
+            user={user}
+            onComplete={handleCalibrationComplete}
+            onCancel={() => setShowCalibration(false)}
+          />
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="landing-page">
       <div className="landing-container">
         <h1>Landing Approach Tracker</h1>
-        <p className="subtitle">KJKA (Jack Edwards Airport, Gulf Shores AL) — Runway {selectedRunway}</p>
+        <p className="subtitle">
+          {selectedRunway.startsWith('custom_') 
+            ? customRunways.find(r => r.id === selectedRunway)?.name || 'Custom Runway'
+            : `KJKA (Jack Edwards Airport, Gulf Shores AL) — Runway ${selectedRunway}`
+          }
+        </p>
 
         <div className="landing-grid">
           {/* Left Column: Controls and Configuration */}
@@ -358,9 +413,22 @@ export default function Landing({ user }) {
                     onChange={(e) => setSelectedRunway(e.target.value)}
                     disabled={tracking}
                   >
-                    <option value="25">25 (Heading 245°)</option>
+                    <option value="27">KJKA 27 (Heading 270° - West)</option>
+                    {customRunways.map(rwy => (
+                      <option key={rwy.id} value={rwy.id}>
+                        {rwy.name} (Heading {rwy.heading}°)
+                      </option>
+                    ))}
                   </select>
                 </label>
+
+                <button
+                  className="btn-calibrate"
+                  onClick={() => setShowCalibration(true)}
+                  disabled={tracking}
+                >
+                  + Calibrate New Runway
+                </button>
               </div>
             </div>
 
@@ -416,23 +484,7 @@ export default function Landing({ user }) {
           <div className="right-col">
             {tracking && (
               <>
-                {/* First-Person 3D View (activates within 3 NM) */}
-                {distanceToThreshold !== null && distanceToThreshold <= 3 && (
-                  <div className="card">
-                    <h2>🎯 First-Person View</h2>
-                    <p style={{ fontSize: '0.9rem', color: '#aaa', marginBottom: '12px' }}>
-                      Fly through the green hoops to stay on the 3° glidepath
-                    </p>
-                    <FirstPersonApproachView
-                      runway={runway}
-                      aircraftData={data}
-                      distanceToThreshold={distanceToThreshold}
-                      currentPhase={currentPhase}
-                    />
-                  </div>
-                )}
-
-                {/* Approach Path Visualization (2D maps) */}
+                {/* Approach Path Visualization */}
                 <div className="card">
                   <h2>Approach Path</h2>
                   <ApproachPath

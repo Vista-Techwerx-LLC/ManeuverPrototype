@@ -196,6 +196,30 @@
   cursor: not-allowed;
 }
 
+.btn-calibrate {
+  width: 100%;
+  padding: 10px;
+  background: rgba(74, 158, 255, 0.2);
+  border: 1px solid rgba(74, 158, 255, 0.5);
+  border-radius: 6px;
+  color: #4a9eff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+
+.btn-calibrate:hover:not(:disabled) {
+  background: rgba(74, 158, 255, 0.3);
+  border-color: rgba(74, 158, 255, 0.7);
+}
+
+.btn-calibrate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Live Values */
 .live-values {
   display: grid;
