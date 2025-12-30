@@ -494,7 +494,17 @@ export default function Landing({ user }) {
           const now = Date.now()
           const lastDeviation = pathFollowingTracking.deviations[pathFollowingTracking.deviations.length - 1]
           
-          // Sample deviations every ~0.5 seconds
+          // Update current deviations immediately (for live display)
+          setPathFollowingTracking(prev => ({
+            ...prev,
+            currentAltDev: Math.abs(altDev),
+            currentLateralDev: lateralDev,
+            currentSpeedDev: Math.abs(speedDev),
+            currentBankDev: Math.abs(bankDev),
+            currentPitchDev: Math.abs(pitchDev)
+          }))
+          
+          // Sample deviations every ~0.5 seconds (for max tracking and data storage)
           if (!lastDeviation || now - lastDeviation.timestamp >= 500) {
             setPathFollowingTracking(prev => ({
               ...prev,
@@ -572,6 +582,11 @@ export default function Landing({ user }) {
           maxSpeedDev: 0,
           maxBankDev: 0,
           maxPitchDev: 0,
+          currentAltDev: 0,
+          currentLateralDev: 0,
+          currentSpeedDev: 0,
+          currentBankDev: 0,
+          currentPitchDev: 0,
           samples: [],
           deviations: []
         })
@@ -1378,39 +1393,39 @@ export default function Landing({ user }) {
                     ) : (
                       <div className="live-values">
                         <div className="live-item">
-                          <div className={`val ${pathFollowingTracking.maxAltDev <= 100 ? '' : 'bad'}`}>
-                            {Math.round(pathFollowingTracking.maxAltDev)}
+                          <div className={`val ${pathFollowingTracking.currentAltDev <= 100 ? '' : 'bad'}`}>
+                            {Math.round(pathFollowingTracking.currentAltDev || 0)}
                           </div>
                           <div className="lbl">ALT DEV ft</div>
-                          <div className="tolerance">(±100 ft)</div>
+                          <div className="tolerance">(±100 ft) Max: {Math.round(pathFollowingTracking.maxAltDev)}</div>
                         </div>
                         <div className="live-item">
-                          <div className={`val ${pathFollowingTracking.maxLateralDev <= 0.2 ? '' : 'bad'}`}>
-                            {(pathFollowingTracking.maxLateralDev * 6076).toFixed(0)}
+                          <div className={`val ${pathFollowingTracking.currentLateralDev <= 0.2 ? '' : 'bad'}`}>
+                            {Math.round((pathFollowingTracking.currentLateralDev || 0) * 6076)}
                           </div>
                           <div className="lbl">LAT DEV ft</div>
-                          <div className="tolerance">(±1215 ft)</div>
+                          <div className="tolerance">(±1215 ft) Max: {Math.round(pathFollowingTracking.maxLateralDev * 6076)}</div>
                         </div>
                         <div className="live-item">
-                          <div className={`val ${pathFollowingTracking.maxSpeedDev <= 10 ? '' : 'bad'}`}>
-                            {Math.round(pathFollowingTracking.maxSpeedDev)}
+                          <div className={`val ${pathFollowingTracking.currentSpeedDev <= 10 ? '' : 'bad'}`}>
+                            {Math.round(pathFollowingTracking.currentSpeedDev || 0)}
                           </div>
                           <div className="lbl">SPD DEV kt</div>
-                          <div className="tolerance">(±10 kt)</div>
+                          <div className="tolerance">(±10 kt) Max: {Math.round(pathFollowingTracking.maxSpeedDev)}</div>
                         </div>
                         <div className="live-item">
-                          <div className={`val ${pathFollowingTracking.maxBankDev <= 5 ? '' : 'bad'}`}>
-                            {Math.round(pathFollowingTracking.maxBankDev)}
+                          <div className={`val ${pathFollowingTracking.currentBankDev <= 5 ? '' : 'bad'}`}>
+                            {Math.round(pathFollowingTracking.currentBankDev || 0)}
                           </div>
                           <div className="lbl">BANK DEV °</div>
-                          <div className="tolerance">(±5°)</div>
+                          <div className="tolerance">(±5°) Max: {Math.round(pathFollowingTracking.maxBankDev)}</div>
                         </div>
                         <div className="live-item">
-                          <div className={`val ${pathFollowingTracking.maxPitchDev <= 3 ? '' : 'bad'}`}>
-                            {Math.round(pathFollowingTracking.maxPitchDev)}
+                          <div className={`val ${pathFollowingTracking.currentPitchDev <= 3 ? '' : 'bad'}`}>
+                            {Math.round(pathFollowingTracking.currentPitchDev || 0)}
                           </div>
                           <div className="lbl">PITCH DEV °</div>
-                          <div className="tolerance">(±3°)</div>
+                          <div className="tolerance">(±3°) Max: {Math.round(pathFollowingTracking.maxPitchDev)}</div>
                         </div>
                       </div>
                     )}
