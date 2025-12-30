@@ -6,7 +6,7 @@ import AutoStart from './AutoStart'
 import FlightPath3D from './FlightPath3D'
 import { SKILL_LEVELS, MANEUVER_TYPES, checkSteepTurnInRange, getSteepTurnEstablishmentThreshold, getSteepTurnPassTolerances } from '../utils/autoStartTolerances'
 import './SteepTurn.css'
-import { gradeSteepTurn, getGradeColorClass } from '../utils/steepTurnGrading'
+import { gradeSteepTurn, getGradeColorClass, getThresholds } from '../utils/steepTurnGrading'
 
 function normalizeAngle(angle) {
   let normalized = angle
@@ -144,7 +144,7 @@ export default function SteepTurn({ user }) {
   })
   const [pendingStart, setPendingStart] = useState(false)
   const [autoStartEnabled, setAutoStartEnabled] = useState(false)
-  const [autoStartSkillLevel, setAutoStartSkillLevel] = useState(SKILL_LEVELS.BEGINNER)
+  const [autoStartSkillLevel, setAutoStartSkillLevel] = useState(SKILL_LEVELS.ACS)
   const [autoStartStatus, setAutoStartStatus] = useState(null)
   const autoStartPhase = useRef('waiting_for_level')
   const levelDetectedTime = useRef(null)
@@ -161,6 +161,7 @@ export default function SteepTurn({ user }) {
   const [lastManeuverData, setLastManeuverData] = useState(null)
   const [currentManeuverId, setCurrentManeuverId] = useState(null)
   const [showAllTips, setShowAllTips] = useState(false)
+  const [showGradingScale, setShowGradingScale] = useState(false)
 
   // Update state based on connection
   useEffect(() => {
@@ -170,6 +171,15 @@ export default function SteepTurn({ user }) {
       setState('disconnected')
     }
   }, [connected, state])
+
+  // Set skill level to ACS when auto-start is first enabled
+  const prevAutoStartEnabled = useRef(false)
+  useEffect(() => {
+    if (autoStartEnabled && !prevAutoStartEnabled.current) {
+      setAutoStartSkillLevel(SKILL_LEVELS.ACS)
+    }
+    prevAutoStartEnabled.current = autoStartEnabled
+  }, [autoStartEnabled])
 
   // Auto-start monitoring
   useEffect(() => {
@@ -1416,19 +1426,139 @@ export default function SteepTurn({ user }) {
             {state !== 'tracking' && state !== 'complete' && (
               <div className="card">
                 <h2>Waiting to Start</h2>
-                <p style={{ color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                  <strong>Skill-Level Standards ({autoStartSkillLevel.charAt(0).toUpperCase() + autoStartSkillLevel.slice(1)}):</strong><br />
-                  • Altitude: ±{passTolerances.altitude} feet<br />
-                  • Airspeed: ±{passTolerances.airspeed} knots<br />
-                  • Bank: {passTolerances.bank.min}°-{passTolerances.bank.max}°<br />
-                  • Rollout heading: ±{passTolerances.rolloutHeading}°<br /><br />
-                  Establish level flight at maneuvering speed, then click <strong>Start Tracking</strong> to capture entry parameters and begin monitoring your 360° steep turn.
+                <p style={{ color: 'var(--text-muted)', lineHeight: '1.6', marginBottom: '20px' }}>
+                  Establish level flight at maneuvering speed, then click <strong>Start Tracking</strong> to capture entry parameters and begin monitoring your 360° steep turn.<br /><br />
+                  Alternatively, enable <strong>Auto-Start</strong> to automatically begin tracking when you establish level flight and initiate your turn. Auto-Start will detect when you're level, wait for you to begin your turn, and automatically capture entry parameters.
                 </p>
+                <div style={{ marginBottom: '16px' }}>
+                  <strong style={{ color: 'var(--text)', display: 'block', marginBottom: '8px' }}>
+                    Skill-Level Standards ({autoStartSkillLevel === 'acs' ? 'ACS' : autoStartSkillLevel.charAt(0).toUpperCase() + autoStartSkillLevel.slice(1)}):
+                  </strong>
+                  <p style={{ color: 'var(--text-muted)', lineHeight: '1.6', margin: 0 }}>
+                    • Altitude: ±{passTolerances.altitude} feet<br />
+                    • Airspeed: ±{passTolerances.airspeed} knots<br />
+                    • Bank: {passTolerances.bank.min}°-{passTolerances.bank.max}°<br />
+                    • Rollout heading: ±{passTolerances.rolloutHeading}°
+                  </p>
+                </div>
+                <button
+                  className="grading-scale-button"
+                  onClick={() => setShowGradingScale(true)}
+                >
+                  View Grading Scale
+                </button>
               </div>
             )}
           </div>
         </div>
       </div>
+
+      {showGradingScale && (
+        <div className="modal-overlay" onClick={() => setShowGradingScale(false)}>
+          <div className="modal-content grading-scale-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Grading Scale - {autoStartSkillLevel === 'acs' ? 'ACS' : autoStartSkillLevel.charAt(0).toUpperCase() + autoStartSkillLevel.slice(1)}</h2>
+            {(() => {
+              const thresholds = getThresholds(autoStartSkillLevel)
+              const grades = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-']
+              
+              return (
+                <div className="grading-scale-content">
+                  <div className="grading-scale-section">
+                    <h3>Bank Angle</h3>
+                    <p className="grading-scale-note">Based on average error from 45° and maximum deviation</p>
+                    <table className="grading-table">
+                      <thead>
+                        <tr>
+                          <th>Grade</th>
+                          <th>Avg Error</th>
+                          <th>Max Dev</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {grades.map(grade => {
+                          const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
+                          const bankData = thresholds.bank[gradeKey]
+                          if (!bankData) return null
+                          return (
+                            <tr key={grade}>
+                              <td className={`grade-cell ${getGradeColorClass(grade)}`}>{grade}</td>
+                              <td>≤ {bankData.avgError}°</td>
+                              <td>≤ {bankData.maxDev}°</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="grading-scale-section grading-scale-section-altitude">
+                    <h3>Altitude</h3>
+                    <p className="grading-scale-note">Maximum deviation from entry altitude</p>
+                    <table className="grading-table grading-table-narrow">
+                      <thead>
+                        <tr>
+                          <th>Grade</th>
+                          <th>Max Dev</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {grades.map(grade => {
+                          const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
+                          const altValue = thresholds.altitude[gradeKey]
+                          if (altValue === undefined) return null
+                          return (
+                            <tr key={grade}>
+                              <td className={`grade-cell ${getGradeColorClass(grade)}`}>{grade}</td>
+                              <td>≤ {altValue} ft</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="grading-scale-section">
+                    <h3>Airspeed</h3>
+                    <p className="grading-scale-note">Maximum deviation from entry airspeed</p>
+                    <table className="grading-table grading-table-narrow">
+                      <thead>
+                        <tr>
+                          <th>Grade</th>
+                          <th>Max Dev</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {grades.map(grade => {
+                          const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
+                          const spdValue = thresholds.airspeed[gradeKey]
+                          if (spdValue === undefined) return null
+                          return (
+                            <tr key={grade}>
+                              <td className={`grade-cell ${getGradeColorClass(grade)}`}>{grade}</td>
+                              <td>≤ {spdValue} kt</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ gridColumn: '1 / -1', marginTop: '8px', padding: '12px 16px', background: 'rgba(255, 255, 255, 0.05)', borderRadius: '8px', fontSize: '13px', color: 'var(--text-muted)', lineHeight: '1.5' }}>
+                    <strong style={{ color: 'var(--text)', display: 'block', marginBottom: '6px' }}>Note:</strong>
+                    The final grade is determined by the worst of the three categories (Bank, Altitude, Airspeed). 
+                    Violations of skill-level standards may cap the grade (e.g., altitude/airspeed violations cap at C-, bank violations cap at D).
+                  </div>
+                </div>
+              )
+            })()}
+            <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn-secondary" onClick={() => setShowGradingScale(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

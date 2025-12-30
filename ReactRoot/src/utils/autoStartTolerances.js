@@ -1,8 +1,7 @@
 export const SKILL_LEVELS = {
-  DEV: 'dev',
   BEGINNER: 'beginner',
   NOVICE: 'novice',
-  PRO: 'pro'
+  ACS: 'acs'
 }
 
 export const MANEUVER_TYPES = {
@@ -27,16 +26,6 @@ const SLOW_FLIGHT_ACS_STANDARDS = {
 
 export const AUTO_START_TOLERANCES = {
   [MANEUVER_TYPES.STEEP_TURN]: {
-    [SKILL_LEVELS.DEV]: {
-      bank: 45,
-      establishmentThreshold: 15,
-      passTolerances: {
-        altitude: 100000,
-        airspeed: 2000,
-        bank: { min: 0, max: 180 },
-        rolloutHeading: 90
-      }
-    },
     [SKILL_LEVELS.BEGINNER]: {
       bank: 20,
       establishmentThreshold: 25,
@@ -57,7 +46,7 @@ export const AUTO_START_TOLERANCES = {
         rolloutHeading: 15
       }
     },
-    [SKILL_LEVELS.PRO]: {
+    [SKILL_LEVELS.ACS]: {
       bank: 5,
       establishmentThreshold: 40,
       passTolerances: {
@@ -69,12 +58,6 @@ export const AUTO_START_TOLERANCES = {
     }
   },
   [MANEUVER_TYPES.SLOW_FLIGHT]: {
-    [SKILL_LEVELS.DEV]: {
-      altitude: 2000,
-      airspeed: { min: -50, max: 100 },
-      heading: 90,
-      bank: 45
-    },
     [SKILL_LEVELS.BEGINNER]: {
       altitude: 500,
       airspeed: { min: -20, max: 30 },
@@ -87,7 +70,7 @@ export const AUTO_START_TOLERANCES = {
       heading: 15,
       bank: 15
     },
-    [SKILL_LEVELS.PRO]: {
+    [SKILL_LEVELS.ACS]: {
       altitude: 150,
       airspeed: { min: -5, max: 12 },
       heading: 12,

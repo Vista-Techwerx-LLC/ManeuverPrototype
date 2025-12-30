@@ -59,16 +59,20 @@
 }
 
 .instrument-card {
-  min-width: 340px;
+  min-width: 380px;
+  flex: 1.2;
 }
 
 .readouts-card {
-  flex: 1;
-  min-width: 300px;
+  flex: 0.8;
+  min-width: 250px;
+  max-width: 300px;
 }
 
 .instrument-card h2,
-.readouts-card h2 {
+.readouts-card h2,
+.instrument-card h3,
+.readouts-card h3 {
   font-size: 16px;
   margin-bottom: 16px;
   color: var(--text-muted);
@@ -77,8 +81,8 @@
 }
 
 .horizon-wrap {
-  width: 320px;
-  height: 320px;
+  width: 360px;
+  height: 360px;
   border-radius: 50%;
   overflow: hidden;
   border: 10px solid #000;

@@ -38,12 +38,6 @@ export default function AutoStart({ enabled, skillLevel, onToggle, onSkillLevelC
         <>
           <div className="skill-level-selector">
             <button
-              className={`skill-level-btn ${skillLevel === SKILL_LEVELS.DEV ? 'active' : ''}`}
-              onClick={() => onSkillLevelChange(SKILL_LEVELS.DEV)}
-            >
-              Dev
-            </button>
-            <button
               className={`skill-level-btn ${skillLevel === SKILL_LEVELS.BEGINNER ? 'active' : ''}`}
               onClick={() => onSkillLevelChange(SKILL_LEVELS.BEGINNER)}
             >
@@ -56,10 +50,10 @@ export default function AutoStart({ enabled, skillLevel, onToggle, onSkillLevelC
               Novice
             </button>
             <button
-              className={`skill-level-btn ${skillLevel === SKILL_LEVELS.PRO ? 'active' : ''}`}
-              onClick={() => onSkillLevelChange(SKILL_LEVELS.PRO)}
+              className={`skill-level-btn ${skillLevel === SKILL_LEVELS.ACS ? 'active' : ''}`}
+              onClick={() => onSkillLevelChange(SKILL_LEVELS.ACS)}
             >
-              Pro
+              ACS
             </button>
           </div>
           

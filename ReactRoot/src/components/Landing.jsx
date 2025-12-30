@@ -121,6 +121,7 @@ export default function Landing({ user }) {
   const [selectedRunway, setSelectedRunway] = useState('27') // KJKA Runway 27
   const [customRunways, setCustomRunways] = useState([])
   const [dropdownOpen, setDropdownOpen] = useState(false)
+  const [pathDropdownOpen, setPathDropdownOpen] = useState(false)
   const [showCalibration, setShowCalibration] = useState(false)
   const [flightPath, setFlightPath] = useState([])
   const [savedLandingPaths, setSavedLandingPaths] = useState([])
@@ -140,12 +141,16 @@ export default function Landing({ user }) {
   const lastGateCheck = useRef({})
   const touchdownData = useRef(null)
   const dropdownRef = useRef(null)
+  const pathDropdownRef = useRef(null)
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   useEffect(() => {
     function handleClickOutside(event) {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setDropdownOpen(false)
+      }
+      if (pathDropdownRef.current && !pathDropdownRef.current.contains(event.target)) {
+        setPathDropdownOpen(false)
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
@@ -814,45 +819,77 @@ export default function Landing({ user }) {
 
                 <label>
                   Landing Path (Optional)
-                  <select
-                    value={selectedLandingPath || ''}
-                    onChange={(e) => setSelectedLandingPath(e.target.value || null)}
-                    disabled={tracking || recordingPath}
-                    style={{ width: '100%', padding: '8px', marginTop: '4px' }}
-                  >
-                    <option value="">None (No reference path)</option>
-                    {savedLandingPaths.map(path => (
-                      <option key={path.id} value={path.id}>
-                        {path.path_name} {path.user_id === user?.id ? '(You)' : '(Shared)'}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  <div className="runway-custom-dropdown" ref={pathDropdownRef}>
+                    <div 
+                      className={`dropdown-selected ${pathDropdownOpen ? 'open' : ''} ${tracking || recordingPath ? 'disabled' : ''}`}
+                      onClick={() => !tracking && !recordingPath && setPathDropdownOpen(!pathDropdownOpen)}
+                    >
+                      <div className="selected-info">
+                        <span className="selected-name">
+                          {selectedLandingPath 
+                            ? (() => {
+                                const path = savedLandingPaths.find(p => p.id === selectedLandingPath)
+                                return path ? `${path.path_name} ${path.user_id === user?.id ? '(You)' : '(Shared)'}` : 'None'
+                              })()
+                            : 'None (No reference path)'
+                          }
+                        </span>
+                      </div>
+                      <div className="dropdown-arrow">▼</div>
+                    </div>
 
-                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#1a1a1a', borderRadius: '4px', border: recordingPath ? '2px solid #ffa500' : '1px solid #333' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <span style={{ fontWeight: 'bold' }}>Record Landing Path</span>
-                    {recordingPath && (
-                      <span style={{ color: '#ffa500', fontSize: '12px' }}>● Recording...</span>
+                    {pathDropdownOpen && (
+                      <div className="dropdown-options">
+                        <div 
+                          className={`dropdown-option ${!selectedLandingPath ? 'active' : ''}`}
+                          onClick={() => {
+                            setSelectedLandingPath(null)
+                            setPathDropdownOpen(false)
+                          }}
+                        >
+                          <div className="option-main">None (No reference path)</div>
+                        </div>
+                        {savedLandingPaths.map(path => (
+                          <div 
+                            key={path.id}
+                            className={`dropdown-option ${selectedLandingPath === path.id ? 'active' : ''}`}
+                            onClick={() => {
+                              setSelectedLandingPath(path.id)
+                              setPathDropdownOpen(false)
+                            }}
+                          >
+                            <div className="option-main">
+                              {path.path_name} {path.user_id === user?.id ? '(You)' : '(Shared)'}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                  <p style={{ fontSize: '12px', color: '#aaa', marginBottom: '8px' }}>
+                </label>
+
+                <div className={`record-path-section ${recordingPath ? 'recording' : ''}`}>
+                  <div className="record-path-header">
+                    <span className="record-path-title">Record Landing Path</span>
+                    {recordingPath && (
+                      <span className="recording-indicator">● Recording...</span>
+                    )}
+                  </div>
+                  <p className="record-path-description">
                     Record a flight path independently of landing tracking. The path will be saved for the selected runway.
                   </p>
                   {!recordingPath ? (
                     <button
-                      className="btn-secondary"
+                      className="btn-calibrate"
                       onClick={startPathRecording}
                       disabled={tracking || !connected}
-                      style={{ width: '100%' }}
                     >
-                      Start Recording Path
+                      + Start Recording Path
                     </button>
                   ) : (
                     <button
-                      className="btn-primary"
+                      className="btn-calibrate btn-recording"
                       onClick={stopPathRecording}
-                      style={{ width: '100%', backgroundColor: '#ff4444' }}
                     >
                       Stop Recording ({pathRecording.length} points)
                     </button>

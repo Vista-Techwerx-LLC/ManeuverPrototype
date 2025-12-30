@@ -956,3 +956,192 @@
   flex-shrink: 0;
 }
 
+.grading-scale-button {
+  width: 100%;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s;
+  background: rgba(163, 113, 247, 0.1);
+  color: var(--purple);
+  border-color: rgba(163, 113, 247, 0.3);
+  margin-top: 16px;
+}
+
+.grading-scale-button:hover {
+  background: rgba(163, 113, 247, 0.2);
+  border-color: rgba(163, 113, 247, 0.5);
+  transform: translateY(-1px);
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  padding: 20px;
+}
+
+.modal-content {
+  background: rgba(26, 31, 58, 0.95);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 700px;
+  width: 100%;
+  max-height: 98vh;
+  overflow-y: auto;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  color: #fff;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+
+.modal-content::-webkit-scrollbar {
+  width: 10px;
+}
+
+.modal-content::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 10px;
+}
+
+.modal-content::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  transition: background 0.2s;
+}
+
+.modal-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+  background-clip: padding-box;
+}
+
+.modal-content h2 {
+  margin: 0 0 20px 0;
+  font-size: 1.5rem;
+  color: #fff;
+}
+
+.grading-scale-modal {
+  min-width: 1400px;
+  max-height: 98vh;
+  overflow-y: visible;
+}
+
+.grading-scale-content {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr;
+  gap: 20px;
+}
+
+.grading-scale-section h3 {
+  margin: 0 0 4px 0;
+  font-size: 1rem;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.grading-scale-section-altitude {
+  margin-left: 30px;
+}
+
+.grading-scale-note {
+  margin: 0 0 8px 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.grading-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.grading-table thead {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.grading-table th {
+  padding: 8px 100px 8px 10px;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.grading-table td {
+  padding: 7px 100px 7px 10px;
+  font-size: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.grading-table td:last-child,
+.grading-table th:last-child {
+  padding-right: 0px !important;
+}
+
+.grading-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.grading-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.grading-table-narrow {
+  width: 100%;
+  max-width: 280px;
+}
+
+.grade-cell {
+  font-weight: 600;
+  font-family: 'Consolas', monospace;
+}
+
+.grade-cell.grade-green {
+  color: var(--green-bright);
+}
+
+.grade-cell.grade-yellow {
+  color: var(--yellow);
+}
+
+.grade-cell.grade-red {
+  color: var(--red-bright);
+}
+
+.modal-content .btn-secondary {
+  padding: 10px 20px;
+  border-radius: 6px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  transition: all 0.2s;
+}
+
+.modal-content .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+}

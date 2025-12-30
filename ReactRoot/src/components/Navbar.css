@@ -2,6 +2,7 @@
   background: var(--card);
   border-bottom: 1px solid var(--border);
   padding: 0;
+  overflow-x: hidden;
 }
 
 .navbar-container {
@@ -12,6 +13,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 24px;
+  flex-wrap: nowrap;
+  overflow-x: hidden;
 }
 
 .navbar-brand {
@@ -27,6 +30,9 @@
   gap: 8px;
   flex: 1;
   justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .navbar-links a {
@@ -36,6 +42,10 @@
   border-radius: 6px;
   transition: all 0.2s;
   font-weight: 500;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  height: 100%;
 }
 
 .navbar-links a:hover {
@@ -52,13 +62,15 @@
   position: relative;
   display: flex;
   align-items: center;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .user-menu-btn {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 8px 12px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
@@ -66,6 +78,9 @@
   cursor: pointer;
   font-size: 14px;
   transition: all 0.2s;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .user-menu-btn:hover {
@@ -76,6 +91,10 @@
 .user-email {
   color: var(--text);
   font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
 }
 
 .dropdown-arrow {
@@ -123,19 +142,90 @@
   border-bottom: 1px solid var(--border);
 }
 
+@media (max-width: 1024px) {
+  .navbar-container {
+    gap: 16px;
+    padding: 12px 16px;
+  }
+  
+  .navbar-brand {
+    font-size: 18px;
+  }
+  
+  .navbar-links {
+    gap: 4px;
+  }
+  
+  .navbar-links a {
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+  
+  .user-email {
+    max-width: 150px;
+  }
+}
+
 @media (max-width: 768px) {
   .navbar-container {
     flex-wrap: wrap;
+    gap: 12px;
+  }
+  
+  .navbar-brand {
+    font-size: 16px;
   }
   
   .navbar-links {
     order: 3;
     width: 100%;
     justify-content: flex-start;
+    gap: 4px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  
+  .navbar-links::-webkit-scrollbar {
+    display: none;
+  }
+  
+  .navbar-links a {
+    padding: 6px 10px;
+    font-size: 13px;
+    flex-shrink: 0;
   }
   
   .user-email {
-    display: none;
+    max-width: 120px;
+  }
+  
+  .user-menu-btn {
+    padding: 8px 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .navbar-container {
+    padding: 10px 12px;
+  }
+  
+  .navbar-brand {
+    font-size: 14px;
+  }
+  
+  .user-email {
+    max-width: 100px;
+    font-size: 12px;
+  }
+  
+  .user-menu-btn {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+  
+  .dropdown-arrow {
+    font-size: 8px;
   }
 }
 

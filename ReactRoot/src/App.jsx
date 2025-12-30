@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
 import Auth from './components/Auth'
 import Dashboard from './components/Dashboard'
-import Telemetry from './components/Telemetry'
 import SteepTurn from './components/SteepTurn'
 import SlowFlight from './components/SlowFlight'
 import Landing from './components/Landing'
@@ -141,10 +140,6 @@ function App() {
           <Route 
             path="/dashboard" 
             element={user ? <Dashboard user={user} /> : <Navigate to="/auth" />} 
-          />
-          <Route 
-            path="/telemetry" 
-            element={user ? <Telemetry user={user} /> : <Navigate to="/auth" />} 
           />
           <Route 
             path="/steep-turn" 

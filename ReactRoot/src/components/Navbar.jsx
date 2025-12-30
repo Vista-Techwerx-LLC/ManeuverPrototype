@@ -46,12 +46,6 @@ export default function Navbar({ user }) {
             Dashboard
           </Link>
           <Link 
-            to="/telemetry" 
-            className={isActive('/telemetry') ? 'active' : ''}
-          >
-            Telemetry
-          </Link>
-          <Link 
             to="/steep-turn" 
             className={isActive('/steep-turn') ? 'active' : ''}
           >

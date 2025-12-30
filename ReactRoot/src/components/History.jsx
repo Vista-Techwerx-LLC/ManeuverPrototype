@@ -483,7 +483,7 @@ function ManeuverCard({ maneuver, onDelete }) {
             <h3>Maximum Deviations</h3>
             <div className="deviation-grid">
               {(() => {
-                const maneuverSkillLevel = skillLevel || details.autoStart?.skillLevel || SKILL_LEVELS.PRO
+                const maneuverSkillLevel = skillLevel || details.autoStart?.skillLevel || SKILL_LEVELS.ACS
                 const tolerances = getSteepTurnPassTolerances(maneuverSkillLevel)
                 const maxBankTolerance = Math.max(tolerances.bank.max - 45, 45 - tolerances.bank.min)
                 

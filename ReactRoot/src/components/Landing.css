@@ -360,6 +360,54 @@
   cursor: not-allowed;
 }
 
+.btn-calibrate.btn-recording {
+  background: rgba(255, 68, 68, 0.2);
+  border-color: rgba(255, 68, 68, 0.5);
+  color: #ff8888;
+}
+
+.btn-calibrate.btn-recording:hover:not(:disabled) {
+  background: rgba(255, 68, 68, 0.3);
+  border-color: rgba(255, 68, 68, 0.7);
+}
+
+.record-path-section {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+}
+
+.record-path-section.recording {
+  border-color: rgba(255, 165, 0, 0.5);
+}
+
+.record-path-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.record-path-title {
+  font-weight: 600;
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.recording-indicator {
+  color: #ffa500;
+  font-size: 0.75rem;
+}
+
+.record-path-description {
+  font-size: 0.75rem;
+  color: #aaa;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
 /* Live Values */
 .live-values {
   display: grid;

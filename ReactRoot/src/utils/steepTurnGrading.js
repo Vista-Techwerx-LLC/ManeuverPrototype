@@ -38,7 +38,7 @@ export function capGrade(current, maxAllowed) {
 }
 
 const GRADING_THRESHOLDS = {
-  pro: {
+  acs: {
     bank: {
       Aplus: { avgError: 0.5, maxDev: 1 },
       A: { avgError: 1, maxDev: 2 },
@@ -94,15 +94,15 @@ const GRADING_THRESHOLDS = {
   }
 }
 
-function getThresholds(skillLevel) {
-  const normalized = (skillLevel || 'pro').toLowerCase()
-  if (normalized === 'pro') return GRADING_THRESHOLDS.pro
+export function getThresholds(skillLevel) {
+  const normalized = (skillLevel || 'acs').toLowerCase()
+  if (normalized === 'acs') return GRADING_THRESHOLDS.acs
   if (normalized === 'novice') return GRADING_THRESHOLDS.novice
   if (normalized === 'beginner') return GRADING_THRESHOLDS.beginner
-  return GRADING_THRESHOLDS.pro
+  return GRADING_THRESHOLDS.acs
 }
 
-export function gradeBank(avgBankError, maxBankDev, skillLevel = 'pro') {
+export function gradeBank(avgBankError, maxBankDev, skillLevel = 'acs') {
   const thresholds = getThresholds(skillLevel)
   const t = thresholds.bank
 
@@ -125,7 +125,7 @@ export function gradeBank(avgBankError, maxBankDev, skillLevel = 'pro') {
   return 'F'
 }
 
-export function gradeAltitude(maxAltDev, skillLevel = 'pro') {
+export function gradeAltitude(maxAltDev, skillLevel = 'acs') {
   const thresholds = getThresholds(skillLevel)
   const t = thresholds.altitude
 
@@ -148,7 +148,7 @@ export function gradeAltitude(maxAltDev, skillLevel = 'pro') {
   return 'F'
 }
 
-export function gradeAirspeed(maxSpdDev, skillLevel = 'pro') {
+export function gradeAirspeed(maxSpdDev, skillLevel = 'acs') {
   const thresholds = getThresholds(skillLevel)
   const t = thresholds.airspeed
 
@@ -171,7 +171,7 @@ export function gradeAirspeed(maxSpdDev, skillLevel = 'pro') {
   return 'F'
 }
 
-export function gradeSteepTurn({ avgBank, maxBankDev, maxAltDev, maxSpdDev, busted, skillLevel = 'pro' }) {
+export function gradeSteepTurn({ avgBank, maxBankDev, maxAltDev, maxSpdDev, busted, skillLevel = 'acs' }) {
   const avgBankError = Math.abs(avgBank - TARGET_BANK)
   const bankDevAbs = Math.abs(maxBankDev ?? 0)
   const altDevAbs = Math.abs(maxAltDev ?? 0)

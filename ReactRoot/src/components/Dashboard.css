@@ -22,8 +22,8 @@
 }
 
 .dashboard-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 24px;
 }
 
@@ -121,14 +121,27 @@
   margin: 0;
 }
 
+.setup-instructions-card {
+  width: 100%;
+}
+
 .setup-steps {
   padding-left: 20px;
   color: var(--text-muted);
-  line-height: 1.8;
+  line-height: 1.6;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 30px 24px;
+  column-gap: 20%;
 }
 
 .setup-steps li {
-  margin-bottom: 12px;
+  margin-bottom: 8px;
+}
+
+
+.telemetry-card {
+  width: 100%;
 }
 
 .setup-steps code {
