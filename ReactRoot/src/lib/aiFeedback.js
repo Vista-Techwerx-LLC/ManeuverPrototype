@@ -126,3 +126,114 @@ export async function fetchSteepTurnFeedback(payload) {
   return await client.generateSteepTurnFeedback(payload)
 }
 
+// Path Following Feedback
+class PathFollowingClient extends OpenAIClient {
+  async generatePathFollowingFeedback(maneuverData) {
+    const systemMessage = this._buildSystemMessage()
+    const userMessage = this._buildUserMessage(maneuverData)
+    
+    const messages = [
+      { role: 'system', content: systemMessage },
+      { role: 'user', content: userMessage }
+    ]
+
+    try {
+      const response = await fetch(this.endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages: messages,
+          temperature: 0.6,
+          max_completion_tokens: 300
+        })
+      })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        throw new Error(`OpenAI API error (${response.status}): ${errorText}`)
+      }
+
+      const result = await response.json()
+      const content = result?.choices?.[0]?.message?.content?.trim()
+      
+      if (!content) {
+        throw new Error('OpenAI returned an empty response')
+      }
+
+      const focusMatch = content.match(/^FOCUS:\s*(.+?)(?:\n|$)/i)
+      const focus = focusMatch ? focusMatch[1].trim() : null
+      const feedback = focusMatch ? content.replace(/^FOCUS:\s*.+?\n/i, '').trim() : content
+
+      return {
+        focus: focus || 'Path Following',
+        feedback: feedback
+      }
+    } catch (error) {
+      console.error('[OpenAI] Path following feedback request failed:', error)
+      throw error
+    }
+  }
+
+  _buildSystemMessage() {
+    return [
+      'You are a Certified Flight Instructor (CFI) coaching a pilot immediately after a path following exercise.',
+      'The pilot was following a reference landing path created by an instructor, and you are evaluating how well they matched it.',
+      'Use FAA/ACS technique and terminology. Assume the pilot wants actionable corrections, not encouragement.',
+      'Output format: Start with "FOCUS: [Area]" on the first line, where [Area] is the single most critical area needing attention (e.g., "Altitude", "Lateral Path", "Airspeed", "Bank", "Pitch").',
+      'Then output 3–6 bullet points only (no preamble, no headings, no summary, no restating the data).',
+      'Each bullet MUST be a single coaching action with a specific cue (e.g., what to look at, what to change, when to do it).',
+      'Keep each bullet under ~20 words. Plain language. No fluff.',
+      'Prioritize the biggest performance gaps first using available deviations and busted flags.',
+      'Cover these categories when relevant: altitude control, lateral path tracking, airspeed management, bank angle control, pitch control, path anticipation.',
+      'Path following requires maintaining precise altitude, staying on the lateral path centerline, and matching reference speeds and attitudes.',
+      'If data is missing or noisy, give the most likely high-value corrections based on common path following errors.'
+    ].join(' ')
+  }
+
+  _buildUserMessage(maneuverData) {
+    const maneuver = maneuverData.maneuver || maneuverData
+    const details = maneuver.details || maneuver
+  
+    const userContent = {
+      maneuverType: maneuverData.maneuverType || 'path_following',
+      grade: maneuver.grade || maneuverData.grade,
+      gradeDetails: maneuver.gradeDetails || maneuverData.gradeDetails,
+      pathName: details.pathName,
+      runway: details.runway,
+      maxDeviations: details.maxDeviations,
+      busted: details.busted,
+      bustedCount: details.bustedCount,
+      timestamp: details.timestamp
+    }
+  
+    return [
+      'Give personalized coaching for this path following exercise.',
+      'Return ONLY 3–6 crisp bullet tips. No intro. No summary. Do not repeat the data.',
+      'Focus on the biggest errors first. If there are busted flags, address them first.',
+      'Each bullet should be one concrete action + one cue (what to do + what to watch).',
+      `Data: ${JSON.stringify(userContent)}`
+    ].join(' ')
+  }
+}
+
+let pathFollowingClientInstance = null
+
+function getPathFollowingClient() {
+  if (!pathFollowingClientInstance) {
+    if (!apiKey) {
+      throw new Error('OpenAI API key is not configured. Set VITE_OPENAI_API_KEY environment variable.')
+    }
+    pathFollowingClientInstance = new PathFollowingClient(apiKey, model)
+  }
+  return pathFollowingClientInstance
+}
+
+export async function fetchPathFollowingFeedback(payload) {
+  const client = getPathFollowingClient()
+  return await client.generatePathFollowingFeedback(payload)
+}
+

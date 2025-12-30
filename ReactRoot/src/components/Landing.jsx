@@ -15,6 +15,10 @@ import {
 } from '../utils/landingStandards'
 import ApproachPath from './ApproachPath'
 import RunwayCalibration, { loadCustomRunways } from './RunwayCalibration'
+import FlightPath3D from './FlightPath3D'
+import { gradePathFollowing } from '../utils/pathFollowingGrading'
+import { fetchPathFollowingFeedback } from '../lib/aiFeedback'
+import { getGradeColorClass } from '../utils/steepTurnGrading'
 import './Landing.css'
 
 // Helper function to convert heading to cardinal direction
@@ -132,6 +136,16 @@ export default function Landing({ user }) {
   const [pathRecording, setPathRecording] = useState([])
   const pathRecordingRef = useRef([]) // Ref to store path data for saving (always current)
   const [isSavingRecordedPath, setIsSavingRecordedPath] = useState(false)
+  const [pathFollowingTracking, setPathFollowingTracking] = useState(null) // Track deviations from reference path
+  const [pathFollowingResult, setPathFollowingResult] = useState(null)
+  const pathStartReached = useRef(false) // Track if we've reached the start of the path
+  const pathFollowingCompleting = useRef(false) // Prevent multiple completion calls
+  const [pathFollowingSkillLevel, setPathFollowingSkillLevel] = useState('pro') // Skill level: beginner, amateur, pro
+  const [currentPathFollowingId, setCurrentPathFollowingId] = useState(null) // Database ID for AI feedback
+  const [aiFeedback, setAiFeedback] = useState(null)
+  const [aiFocus, setAiFocus] = useState(null)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
   const [phaseMetrics, setPhaseMetrics] = useState({})
   const [gatesPassed, setGatesPassed] = useState([])
   const [violations, setViolations] = useState([])
@@ -434,7 +448,94 @@ export default function Landing({ user }) {
         }])
       }
     }
-  }, [data, connected, tracking, runway, currentPhase, vref, state])
+
+    // Track deviations from reference path if path following is active
+    if (pathFollowingTracking && pathFollowingTracking.referencePath && isAirborne && isMoving) {
+      // Check if we've reached the start of the path
+      if (!pathStartReached.current) {
+        const pathStart = pathFollowingTracking.referencePath[0]
+        const distToStart = calculateDistance(
+          data.lat, data.lon,
+          pathStart.lat, pathStart.lon
+        )
+        
+        // Consider start reached if within 0.3 NM of the first point
+        if (distToStart <= 0.3) {
+          pathStartReached.current = true
+          console.log('Path start reached! Beginning deviation tracking.')
+        }
+      }
+      
+      // Only track deviations after reaching the start point
+      if (pathStartReached.current) {
+        // Find the closest point on the reference path
+        let closestPoint = null
+        let minDistance = Infinity
+        
+        pathFollowingTracking.referencePath.forEach((refPoint) => {
+          const dist = calculateDistance(
+            data.lat, data.lon,
+            refPoint.lat, refPoint.lon
+          )
+          if (dist < minDistance) {
+            minDistance = dist
+            closestPoint = refPoint
+          }
+        })
+        
+        if (closestPoint && minDistance <= 2) { // Only track if within 2 NM of the path
+          // Calculate deviations
+          const altDev = data.alt_ft - closestPoint.alt
+          const speedDev = data.ias_kt - closestPoint.airspeed
+          const bankDev = (data.bank_deg || 0) - (closestPoint.bank || 0)
+          const pitchDev = (data.pitch_deg || 0) - (closestPoint.pitch || 0)
+          const lateralDev = minDistance // Distance to closest point on path
+          
+          const now = Date.now()
+          const lastDeviation = pathFollowingTracking.deviations[pathFollowingTracking.deviations.length - 1]
+          
+          // Sample deviations every ~0.5 seconds
+          if (!lastDeviation || now - lastDeviation.timestamp >= 500) {
+            setPathFollowingTracking(prev => ({
+              ...prev,
+              maxAltDev: Math.max(prev.maxAltDev, Math.abs(altDev)),
+              maxLateralDev: Math.max(prev.maxLateralDev, lateralDev),
+              maxSpeedDev: Math.max(prev.maxSpeedDev, Math.abs(speedDev)),
+              maxBankDev: Math.max(prev.maxBankDev, Math.abs(bankDev)),
+              maxPitchDev: Math.max(prev.maxPitchDev, Math.abs(pitchDev)),
+              samples: [...prev.samples, {
+                timestamp: now,
+                altDev,
+                lateralDev,
+                speedDev,
+                bankDev,
+                pitchDev,
+                closestPointAlt: closestPoint.alt,
+                closestPointSpeed: closestPoint.airspeed
+              }],
+              deviations: [...prev.deviations, {
+                timestamp: now,
+                alt: altDev,
+                lateral: lateralDev,
+                speed: speedDev,
+                bank: bankDev,
+                pitch: pitchDev
+              }]
+            }))
+          }
+        }
+      }
+    }
+
+    // Auto-stop path following tracking when grounded and slow (only if we've started tracking)
+    // Check this separately from the airborne check above - needs to run even when not airborne
+    if (pathFollowingTracking && pathStartReached.current && data.on_ground && (data.ias_kt || 0) < 10 && !pathFollowingResult && !pathFollowingCompleting.current) {
+      pathFollowingCompleting.current = true
+      setTimeout(() => {
+        completePathFollowing()
+      }, 1000)
+    }
+  }, [data, connected, tracking, runway, currentPhase, vref, state, pathFollowingTracking, pathFollowingResult])
 
   function startTracking() {
     if (!runway) {
@@ -450,18 +551,50 @@ export default function Landing({ user }) {
     setGatesPassed([])
     setViolations([])
     setLandingResult(null)
+    setPathFollowingResult(null)
     hasBeenSaved.current = false
     previousPhase.current = LANDING_PHASES.NONE
     lastGateCheck.current = {}
     touchdownData.current = null
     setState('tracking')
+    
+    // Initialize path following tracking if a reference path is selected
+    if (selectedLandingPath) {
+      const referencePath = savedLandingPaths.find(p => p.id === selectedLandingPath)
+      if (referencePath && referencePath.path_data) {
+        pathStartReached.current = false // Reset start reached flag
+        pathFollowingCompleting.current = false // Reset completion flag
+        setPathFollowingTracking({
+          referencePath: referencePath.path_data,
+          pathName: referencePath.path_name,
+          maxAltDev: 0,
+          maxLateralDev: 0,
+          maxSpeedDev: 0,
+          maxBankDev: 0,
+          maxPitchDev: 0,
+          samples: [],
+          deviations: []
+        })
+        console.log('Started path following tracking with reference:', referencePath.path_name, '- Waiting for path start...')
+      }
+    } else {
+      setPathFollowingTracking(null)
+      pathStartReached.current = false
+    }
+    
     console.log('Started tracking landing approach')
   }
 
   function stopTracking() {
-    setTracking(false)
-    setState('ready')
-    setCurrentPhase(LANDING_PHASES.NONE)
+    // If path following is active and we've started tracking, complete it
+    if (pathFollowingTracking && pathStartReached.current && !pathFollowingResult && !pathFollowingCompleting.current) {
+      pathFollowingCompleting.current = true
+      completePathFollowing()
+    } else {
+      setTracking(false)
+      setState('ready')
+      setCurrentPhase(LANDING_PHASES.NONE)
+    }
   }
 
   function startPathRecording() {
@@ -620,6 +753,255 @@ export default function Landing({ user }) {
     }
   }
 
+  function completePathFollowing() {
+    console.log('completePathFollowing called', {
+      hasTracking: !!pathFollowingTracking,
+      hasResult: !!pathFollowingResult,
+      startReached: pathStartReached.current
+    })
+    
+    if (!pathFollowingTracking) {
+      console.log('completePathFollowing: No tracking data')
+      return
+    }
+    
+    if (pathFollowingResult) {
+      console.log('completePathFollowing: Already completed')
+      return
+    }
+    
+    console.log('Completing path following. Max deviations:', {
+      alt: pathFollowingTracking.maxAltDev,
+      lateral: pathFollowingTracking.maxLateralDev,
+      speed: pathFollowingTracking.maxSpeedDev,
+      bank: pathFollowingTracking.maxBankDev,
+      pitch: pathFollowingTracking.maxPitchDev,
+      samples: pathFollowingTracking.samples.length,
+      deviations: pathFollowingTracking.deviations.length
+    })
+    
+    // Grade based on deviations using letter grades
+    // Tolerances for busted flags: Altitude ±100ft, Lateral ±0.2 NM, Speed ±10kt, Bank ±5°, Pitch ±3°
+    const busted = {
+      altitude: pathFollowingTracking.maxAltDev > 100,
+      lateral: pathFollowingTracking.maxLateralDev > 0.2,
+      speed: pathFollowingTracking.maxSpeedDev > 10,
+      bank: pathFollowingTracking.maxBankDev > 5,
+      pitch: pathFollowingTracking.maxPitchDev > 3
+    }
+    
+    const bustedCount = Object.values(busted).filter(v => v).length
+    
+    // Calculate letter grades using grading system
+    const gradeData = gradePathFollowing({
+      maxAltDev: pathFollowingTracking.maxAltDev,
+      maxLateralDev: pathFollowingTracking.maxLateralDev,
+      maxSpeedDev: pathFollowingTracking.maxSpeedDev,
+      maxBankDev: pathFollowingTracking.maxBankDev,
+      maxPitchDev: pathFollowingTracking.maxPitchDev,
+      busted,
+      skillLevel: pathFollowingSkillLevel
+    })
+    
+    const result = {
+      grade: gradeData.finalGrade,
+      gradeDetails: gradeData,
+      pathName: pathFollowingTracking.pathName,
+      runway: selectedRunway,
+      maxDeviations: {
+        altitude: pathFollowingTracking.maxAltDev,
+        lateral: pathFollowingTracking.maxLateralDev,
+        speed: pathFollowingTracking.maxSpeedDev,
+        bank: pathFollowingTracking.maxBankDev,
+        pitch: pathFollowingTracking.maxPitchDev
+      },
+      busted,
+      bustedCount,
+      samples: pathFollowingTracking.samples,
+      deviations: pathFollowingTracking.deviations,
+      flightPath: flightPath, // Include flight path for 3D playback
+      referencePath: pathFollowingTracking.referencePath, // Include reference path for 3D comparison
+      skillLevel: pathFollowingSkillLevel,
+      timestamp: new Date().toISOString()
+    }
+    
+    setPathFollowingResult(result)
+    setState('complete')
+    setTracking(false)
+    
+    // Save to database
+    savePathFollowingToDatabase(user.id, {
+      grade: gradeData.finalGrade,
+      details: result
+    }).then(maneuverId => {
+      if (maneuverId) {
+        setCurrentPathFollowingId(maneuverId)
+        // Check for existing feedback
+        getPathFollowingFeedback(maneuverId).then(feedback => {
+          if (feedback) {
+            const focusMatch = feedback.match(/^FOCUS:\s*(.+?)(?:\n|$)/i)
+            if (focusMatch) {
+              setAiFocus(focusMatch[1].trim())
+              setAiFeedback(feedback.replace(/^FOCUS:\s*.+?\n/i, '').trim())
+            } else {
+              setAiFocus('Path Following')
+              setAiFeedback(feedback)
+            }
+          }
+        })
+      }
+    })
+  }
+
+  async function savePathFollowingToDatabase(userId, pathFollowingData) {
+    try {
+      const { data, error } = await supabase
+        .from('maneuver_results')
+        .insert({
+          user_id: userId,
+          maneuver_type: 'path_following',
+          grade: pathFollowingData.grade,
+          result_data: pathFollowingData.details,
+          skill_level: pathFollowingSkillLevel
+        })
+        .select('id')
+        .single()
+      
+      if (error) {
+        console.error('Error saving path following:', error)
+        return null
+      }
+      
+      console.log('✅ Path following saved to database')
+      return data?.id || null
+    } catch (error) {
+      console.error('Error saving path following:', error)
+      return null
+    }
+  }
+
+  async function getPathFollowingFeedback(maneuverId) {
+    if (!maneuverId) return null
+    
+    try {
+      const { data, error } = await supabase
+        .from('maneuver_results')
+        .select('result_data')
+        .eq('id', maneuverId)
+        .single()
+      
+      if (error || !data) return null
+      
+      const resultData = data.result_data
+      return resultData?.ai_feedback || null
+    } catch (error) {
+      console.error('Error fetching path following feedback:', error)
+      return null
+    }
+  }
+
+  async function updatePathFollowingWithFeedback(maneuverId, feedback) {
+    if (!maneuverId) return false
+    
+    try {
+      const { data: existingData, error: fetchError } = await supabase
+        .from('maneuver_results')
+        .select('result_data')
+        .eq('id', maneuverId)
+        .single()
+      
+      if (fetchError || !existingData) {
+        console.error('Error fetching path following data:', fetchError)
+        return false
+      }
+      
+      const updatedResultData = {
+        ...existingData.result_data,
+        ai_feedback: feedback
+      }
+      
+      const { error } = await supabase
+        .from('maneuver_results')
+        .update({ result_data: updatedResultData })
+        .eq('id', maneuverId)
+      
+      if (error) {
+        console.error('Error updating path following with feedback:', error)
+        return false
+      }
+      
+      return true
+    } catch (error) {
+      console.error('Error updating path following with feedback:', error)
+      return false
+    }
+  }
+
+  async function handlePathFollowingAiFeedbackRequest() {
+    if (aiFeedback) {
+      return
+    }
+
+    if (!pathFollowingResult) {
+      setAiError('Path following data unavailable. Complete a path following exercise first.')
+      return
+    }
+
+    setAiLoading(true)
+    setAiError('')
+
+    try {
+      const payload = {
+        maneuver: {
+          grade: pathFollowingResult.grade,
+          gradeDetails: pathFollowingResult.gradeDetails,
+          details: {
+            pathName: pathFollowingResult.pathName,
+            runway: pathFollowingResult.runway,
+            maxDeviations: pathFollowingResult.maxDeviations,
+            busted: pathFollowingResult.busted,
+            bustedCount: pathFollowingResult.bustedCount,
+            skillLevel: pathFollowingResult.skillLevel,
+            timestamp: pathFollowingResult.timestamp
+          }
+        },
+        maneuverType: 'path_following',
+        user: {
+          id: user.id,
+          email: user.email
+        }
+      }
+
+      const result = await fetchPathFollowingFeedback(payload)
+      
+      if (typeof result === 'object' && result.focus && result.feedback) {
+        setAiFocus(result.focus)
+        setAiFeedback(result.feedback)
+        const feedbackToSave = `FOCUS: ${result.focus}\n\n${result.feedback}`
+        if (currentPathFollowingId) {
+          await updatePathFollowingWithFeedback(currentPathFollowingId, feedbackToSave)
+        }
+      } else {
+        const feedbackText = typeof result === 'string' ? result : JSON.stringify(result)
+        const focusMatch = feedbackText.match(/^FOCUS:\s*(.+?)(?:\n|$)/i)
+        if (focusMatch) {
+          setAiFocus(focusMatch[1].trim())
+          setAiFeedback(feedbackText.replace(/^FOCUS:\s*.+?\n/i, '').trim())
+        } else {
+          setAiFocus('Path Following')
+          setAiFeedback(feedbackText)
+        }
+        if (currentPathFollowingId) {
+          await updatePathFollowingWithFeedback(currentPathFollowingId, feedbackText)
+        }
+      }
+    } catch (error) {
+      setAiError(error.message || 'Unable to get AI feedback')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   function reset() {
     setTracking(false)
     setState('ready')
@@ -630,6 +1012,14 @@ export default function Landing({ user }) {
     setGatesPassed([])
     setViolations([])
     setLandingResult(null)
+    setPathFollowingTracking(null)
+    setPathFollowingResult(null)
+    setCurrentPathFollowingId(null)
+    setAiFeedback(null)
+    setAiFocus(null)
+    setAiError('')
+    pathStartReached.current = false
+    pathFollowingCompleting.current = false
     hasBeenSaved.current = false
     previousPhase.current = LANDING_PHASES.NONE
     lastGateCheck.current = {}
@@ -868,6 +1258,22 @@ export default function Landing({ user }) {
                   </div>
                 </label>
 
+                {selectedLandingPath && (
+                  <label>
+                    Skill Level
+                    <select
+                      value={pathFollowingSkillLevel}
+                      onChange={(e) => setPathFollowingSkillLevel(e.target.value)}
+                      disabled={tracking}
+                      style={{ width: '100%', padding: '8px', marginTop: '4px' }}
+                    >
+                      <option value="beginner">Beginner</option>
+                      <option value="amateur">Amateur</option>
+                      <option value="pro">Pro</option>
+                    </select>
+                  </label>
+                )}
+
                 <div className={`record-path-section ${recordingPath ? 'recording' : ''}`}>
                   <div className="record-path-header">
                     <span className="record-path-title">Record Landing Path</span>
@@ -958,6 +1364,59 @@ export default function Landing({ user }) {
           <div className="right-col">
             {tracking && (
               <>
+                {/* Path Following Deviations (if tracking against reference path) */}
+                {pathFollowingTracking && (
+                  <div className="card">
+                    <h2>Path Following - {pathFollowingTracking.pathName}</h2>
+                    {!pathStartReached.current ? (
+                      <div style={{ padding: '20px', textAlign: 'center', color: '#4a9eff' }}>
+                        <div style={{ fontSize: '1.2rem', marginBottom: '8px' }}>⏳ Waiting for Path Start</div>
+                        <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
+                          Navigate to the start of the path to begin tracking deviations
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="live-values">
+                        <div className="live-item">
+                          <div className={`val ${pathFollowingTracking.maxAltDev <= 100 ? '' : 'bad'}`}>
+                            {Math.round(pathFollowingTracking.maxAltDev)}
+                          </div>
+                          <div className="lbl">ALT DEV ft</div>
+                          <div className="tolerance">(±100 ft)</div>
+                        </div>
+                        <div className="live-item">
+                          <div className={`val ${pathFollowingTracking.maxLateralDev <= 0.2 ? '' : 'bad'}`}>
+                            {(pathFollowingTracking.maxLateralDev * 6076).toFixed(0)}
+                          </div>
+                          <div className="lbl">LAT DEV ft</div>
+                          <div className="tolerance">(±1215 ft)</div>
+                        </div>
+                        <div className="live-item">
+                          <div className={`val ${pathFollowingTracking.maxSpeedDev <= 10 ? '' : 'bad'}`}>
+                            {Math.round(pathFollowingTracking.maxSpeedDev)}
+                          </div>
+                          <div className="lbl">SPD DEV kt</div>
+                          <div className="tolerance">(±10 kt)</div>
+                        </div>
+                        <div className="live-item">
+                          <div className={`val ${pathFollowingTracking.maxBankDev <= 5 ? '' : 'bad'}`}>
+                            {Math.round(pathFollowingTracking.maxBankDev)}
+                          </div>
+                          <div className="lbl">BANK DEV °</div>
+                          <div className="tolerance">(±5°)</div>
+                        </div>
+                        <div className="live-item">
+                          <div className={`val ${pathFollowingTracking.maxPitchDev <= 3 ? '' : 'bad'}`}>
+                            {Math.round(pathFollowingTracking.maxPitchDev)}
+                          </div>
+                          <div className="lbl">PITCH DEV °</div>
+                          <div className="tolerance">(±3°)</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Approach Path Visualization */}
                 <div className="card">
                   <h2>Approach Path</h2>
@@ -1073,7 +1532,155 @@ export default function Landing({ user }) {
               </div>
             )}
 
-            {!tracking && state === 'ready' && (
+            {pathFollowingResult && (
+              <div className={`card grade-card ${getGradeColorClass(pathFollowingResult.grade)}`}>
+                <h2>Path Following Complete</h2>
+                <div className="grade-header">
+                  <div className={`grade ${getGradeColorClass(pathFollowingResult.grade)}`}>
+                    {pathFollowingResult.grade}
+                  </div>
+                  {pathFollowingResult.skillLevel && (
+                    <div className="skill-level-badge">
+                      {pathFollowingResult.skillLevel.charAt(0).toUpperCase() + pathFollowingResult.skillLevel.slice(1)}
+                    </div>
+                  )}
+                </div>
+
+                {pathFollowingResult.gradeDetails && (
+                  <div className="grade-breakdown">
+                    <h3>Grade Breakdown</h3>
+                    <div className="breakdown-grid">
+                      <div className="breakdown-item">
+                        <span>Altitude:</span>
+                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.altitude)}>
+                          {pathFollowingResult.gradeDetails.breakdown.altitude}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Lateral:</span>
+                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.lateral)}>
+                          {pathFollowingResult.gradeDetails.breakdown.lateral}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Speed:</span>
+                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.speed)}>
+                          {pathFollowingResult.gradeDetails.breakdown.speed}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Bank:</span>
+                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.bank)}>
+                          {pathFollowingResult.gradeDetails.breakdown.bank}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Pitch:</span>
+                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.pitch)}>
+                          {pathFollowingResult.gradeDetails.breakdown.pitch}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="touchdown-summary">
+                  <h3>Maximum Deviations</h3>
+                  <div className="touchdown-details">
+                    <div className="detail-row">
+                      <span>Altitude:</span>
+                      <span className={pathFollowingResult.busted.altitude ? 'bad' : 'good'}>
+                        {Math.round(pathFollowingResult.maxDeviations.altitude)} ft
+                        {pathFollowingResult.busted.altitude ? ' ⚠ BUSTED' : ' ✓'}
+                      </span>
+                    </div>
+                    <div className="detail-row">
+                      <span>Lateral (Path):</span>
+                      <span className={pathFollowingResult.busted.lateral ? 'bad' : 'good'}>
+                        {Math.round(pathFollowingResult.maxDeviations.lateral * 6076)} ft
+                        {pathFollowingResult.busted.lateral ? ' ⚠ BUSTED' : ' ✓'}
+                      </span>
+                    </div>
+                    <div className="detail-row">
+                      <span>Speed:</span>
+                      <span className={pathFollowingResult.busted.speed ? 'bad' : 'good'}>
+                        {Math.round(pathFollowingResult.maxDeviations.speed)} kt
+                        {pathFollowingResult.busted.speed ? ' ⚠ BUSTED' : ' ✓'}
+                      </span>
+                    </div>
+                    <div className="detail-row">
+                      <span>Bank Angle:</span>
+                      <span className={pathFollowingResult.busted.bank ? 'bad' : 'good'}>
+                        {Math.round(pathFollowingResult.maxDeviations.bank)}°
+                        {pathFollowingResult.busted.bank ? ' ⚠ BUSTED' : ' ✓'}
+                      </span>
+                    </div>
+                    <div className="detail-row">
+                      <span>Pitch Angle:</span>
+                      <span className={pathFollowingResult.busted.pitch ? 'bad' : 'good'}>
+                        {Math.round(pathFollowingResult.maxDeviations.pitch)}°
+                        {pathFollowingResult.busted.pitch ? ' ⚠ BUSTED' : ' ✓'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {pathFollowingResult.flightPath && pathFollowingResult.flightPath.length > 0 && (
+                  <div style={{ marginTop: '24px' }}>
+                    <FlightPath3D 
+                      flightPath={pathFollowingResult.flightPath}
+                      entry={pathFollowingResult.flightPath[0]}
+                      referencePath={pathFollowingResult.referencePath || (() => {
+                        // Fallback: Get reference path from saved paths if available
+                        if (pathFollowingResult.pathName && savedLandingPaths.length > 0) {
+                          const refPath = savedLandingPaths.find(p => p.path_name === pathFollowingResult.pathName)
+                          return refPath?.path_data || null
+                        }
+                        return null
+                      })()}
+                    />
+                  </div>
+                )}
+
+                {/* AI Feedback Section */}
+                {aiFeedback ? (
+                  <div className="ai-feedback-section" style={{ marginTop: '24px' }}>
+                    <h3>AI Feedback</h3>
+                    {aiFocus && (
+                      <div className="ai-focus">
+                        <strong>Focus:</strong> {aiFocus}
+                      </div>
+                    )}
+                    <div className="ai-feedback-text">
+                      {aiFeedback.split('\n').map((line, idx) => (
+                        <div key={idx}>{line}</div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ marginTop: '24px' }}>
+                    <button
+                      className="btn-primary"
+                      onClick={handlePathFollowingAiFeedbackRequest}
+                      disabled={aiLoading}
+                    >
+                      {aiLoading ? 'Loading...' : 'Get AI Feedback'}
+                    </button>
+                    {aiError && (
+                      <div style={{ color: '#ff4444', marginTop: '8px', fontSize: '0.9rem' }}>
+                        {aiError}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <button className="big-button reset" onClick={reset}>
+                  Reset & Try Again
+                </button>
+              </div>
+            )}
+
+            {!tracking && state === 'ready' && !pathFollowingResult && (
               <div className="card">
                 <h2>KJKA Approach Standards</h2>
                 <div className="info-section">
