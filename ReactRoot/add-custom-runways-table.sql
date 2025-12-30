@@ -17,3 +17,4 @@ CREATE INDEX IF NOT EXISTS idx_custom_runways_name ON custom_runways(runway_name
 -- Disable Row Level Security
 ALTER TABLE custom_runways DISABLE ROW LEVEL SECURITY;
 
+

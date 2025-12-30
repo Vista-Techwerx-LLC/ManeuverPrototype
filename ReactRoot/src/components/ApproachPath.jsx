@@ -14,7 +14,8 @@ export default function ApproachPath({
   flightPath,
   currentPhase,
   glidepathDeviation,
-  distanceToThreshold
+  distanceToThreshold,
+  selectedLandingPath = null
 }) {
   const topViewCanvasRef = useRef(null)
   const sideViewCanvasRef = useRef(null)
@@ -24,96 +25,7 @@ export default function ApproachPath({
 
     drawTopView()
     drawSideView()
-  }, [runway, aircraftData, flightPath, currentPhase])
-
-  // Draw standard landing pattern as visual guide
-  // Based on JKA standards: downwind 0.7-1.0 NM from centerline, base turn, final on 3° glidepath
-  function drawLandingPattern(ctx, scale) {
-    ctx.strokeStyle = '#ffa500'
-    ctx.lineWidth = 2.5
-    ctx.setLineDash([12, 6])
-    ctx.globalAlpha = 0.75
-    
-    // Pattern dimensions based on standards
-    const downwindDistance = 0.85 // Average of 0.7-1.0 NM from centerline (left side for standard pattern)
-    const downwindStartY = -400 // Start downwind leg (well up from threshold)
-    const downwindAbeamY = -120 // Abeam threshold point (where you'd start base turn)
-    const baseMidDistance = 0.65 // Average of 0.5-0.8 NM from centerline at mid-base
-    const finalStartY = -200 // Where final approach begins (after base turn)
-    
-    // Draw downwind leg (left side of runway, 0.85 NM away, parallel to runway)
-    ctx.beginPath()
-    const downwindX = -downwindDistance * scale // Left side (negative = left)
-    ctx.moveTo(downwindX, downwindStartY)
-    ctx.lineTo(downwindX, downwindAbeamY) // Down to abeam threshold
-    ctx.stroke()
-    
-    // Draw base leg (perpendicular to runway, connecting downwind to final)
-    // Base leg goes from downwind position toward runway
-    ctx.beginPath()
-    ctx.moveTo(downwindX, downwindAbeamY) // End of downwind (abeam threshold)
-    // Base leg curves toward final approach
-    const baseEndX = -baseMidDistance * scale
-    const baseEndY = finalStartY
-    // Smooth curve from downwind to base to final
-    ctx.quadraticCurveTo(
-      (downwindX + baseEndX) / 2, // Control point X
-      (downwindAbeamY + baseEndY) / 2, // Control point Y
-      baseEndX, baseEndY // End point
-    )
-    ctx.stroke()
-    
-    // Draw final approach path (straight down centerline, 3° glidepath)
-    ctx.beginPath()
-    ctx.moveTo(baseEndX, baseEndY) // End of base leg
-    // Smooth turn onto final (centerline)
-    ctx.quadraticCurveTo(
-      baseEndX / 2, // Control point X (halfway to center)
-      (baseEndY - 50) / 2, // Control point Y
-      0, finalStartY // Start of final (on centerline)
-    )
-    // Final approach straight down centerline to threshold
-    ctx.lineTo(0, 0) // To threshold
-    ctx.stroke()
-    
-    // Add pattern labels and reference points
-    ctx.fillStyle = '#ffa500'
-    ctx.font = 'bold 11px monospace'
-    ctx.globalAlpha = 0.9
-    
-    // Downwind label
-    ctx.fillText('DOWNWIND', downwindX - 55, (downwindStartY + downwindAbeamY) / 2)
-    ctx.font = '9px monospace'
-    ctx.fillText('0.7-1.0 NM', downwindX - 50, (downwindStartY + downwindAbeamY) / 2 + 12)
-    ctx.fillText('1017 ft MSL', downwindX - 55, downwindStartY - 8)
-    
-    // Base label
-    ctx.font = 'bold 11px monospace'
-    ctx.fillText('BASE', (downwindX + baseEndX) / 2 - 20, downwindAbeamY - 15)
-    ctx.font = '9px monospace'
-    ctx.fillText('0.5-0.8 NM', (downwindX + baseEndX) / 2 - 25, downwindAbeamY - 3)
-    
-    // Final label
-    ctx.font = 'bold 11px monospace'
-    ctx.fillText('FINAL', 12, finalStartY / 2)
-    ctx.font = '9px monospace'
-    ctx.fillText('3° GLIDEPATH', 12, finalStartY / 2 + 12)
-    
-    // Pattern entry arrow
-    ctx.strokeStyle = '#ffa500'
-    ctx.lineWidth = 1.5
-    ctx.setLineDash([])
-    ctx.beginPath()
-    ctx.moveTo(downwindX, downwindStartY + 30)
-    ctx.lineTo(downwindX, downwindStartY)
-    ctx.lineTo(downwindX - 5, downwindStartY + 5)
-    ctx.moveTo(downwindX, downwindStartY)
-    ctx.lineTo(downwindX + 5, downwindStartY + 5)
-    ctx.stroke()
-    
-    ctx.setLineDash([])
-    ctx.globalAlpha = 1.0
-  }
+  }, [runway, aircraftData, flightPath, currentPhase, selectedLandingPath])
 
   function drawTopView() {
     const canvas = topViewCanvasRef.current
@@ -180,8 +92,58 @@ export default function ApproachPath({
       ctx.fillText(gateName, 55, y + 4)
     })
     
-    // Draw standard landing pattern/approach path (visual guide)
-    drawLandingPattern(ctx, scale)
+    // Draw selected landing path (reference path) if provided
+    if (selectedLandingPath && selectedLandingPath.length > 3) {
+      const referencePoints = []
+      
+      // Filter and validate points from saved path
+      selectedLandingPath.forEach((point) => {
+        const dist = calculateDistance(
+          point.lat, point.lon,
+          runway.threshold.lat, runway.threshold.lon
+        )
+        
+        // Only include points within 5 NM of threshold
+        if (dist <= 5) {
+          const lateralDev = calculateLateralDeviation(
+            point.lat, point.lon,
+            runway.threshold.lat, runway.threshold.lon,
+            runway.oppositeEnd.lat, runway.oppositeEnd.lon
+          )
+          
+          // Only include points within reasonable lateral range (±2 NM)
+          if (Math.abs(lateralDev) <= 2) {
+            referencePoints.push({
+              x: lateralDev * scale,
+              y: -dist * scale,
+              dist,
+              lateralDev
+            })
+          }
+        }
+      })
+      
+      // Draw reference path in orange dotted line
+      if (referencePoints.length > 3) {
+        ctx.strokeStyle = '#ffa500'
+        ctx.lineWidth = 2.5
+        ctx.setLineDash([12, 6])
+        ctx.globalAlpha = 0.75
+        ctx.beginPath()
+        
+        referencePoints.forEach((pt, idx) => {
+          if (idx === 0) {
+            ctx.moveTo(pt.x, pt.y)
+          } else {
+            ctx.lineTo(pt.x, pt.y)
+          }
+        })
+        
+        ctx.stroke()
+        ctx.setLineDash([])
+        ctx.globalAlpha = 1.0
+      }
+    }
     
     // Draw flight path (only if airborne and has actual data)
     // Only show path when reasonably close to runway (< 5 NM)
@@ -252,11 +214,12 @@ export default function ApproachPath({
         // The view is RUNWAY-RELATIVE: runway always points down toward threshold.
         // Icon is drawn pointing UP (nose at -Y).
         // When aligned with runway, icon should point DOWN (180°).
-        // Turn LEFT (heading decreases) → icon should point LEFT of down.
-        // Turn RIGHT (heading increases) → icon should point RIGHT of down.
+        // Canvas rotation: positive = clockwise (which matches heading increase)
+        // Base rotation: 180° to point down when aligned with runway
+        // Plus headingDiff to account for heading difference
         const headingDiff = aircraftData.hdg_true - runway.heading
-        const rotationRad = (180 + headingDiff) * Math.PI / 180
-        ctx.rotate(-rotationRad)
+        const rotationRad = headingDiff * Math.PI / 180
+        ctx.rotate(Math.PI + rotationRad) // 180° base + heading difference
         
         // Draw aircraft icon
         ctx.fillStyle = '#ffff00'

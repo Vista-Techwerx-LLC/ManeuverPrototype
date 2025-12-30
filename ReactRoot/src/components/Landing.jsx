@@ -123,6 +123,14 @@ export default function Landing({ user }) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [showCalibration, setShowCalibration] = useState(false)
   const [flightPath, setFlightPath] = useState([])
+  const [savedLandingPaths, setSavedLandingPaths] = useState([])
+  const [selectedLandingPath, setSelectedLandingPath] = useState(null)
+  const [savePathName, setSavePathName] = useState('')
+  const [showSavePathDialog, setShowSavePathDialog] = useState(false)
+  const [recordingPath, setRecordingPath] = useState(false)
+  const [pathRecording, setPathRecording] = useState([])
+  const pathRecordingRef = useRef([]) // Ref to store path data for saving (always current)
+  const [isSavingRecordedPath, setIsSavingRecordedPath] = useState(false)
   const [phaseMetrics, setPhaseMetrics] = useState({})
   const [gatesPassed, setGatesPassed] = useState([])
   const [violations, setViolations] = useState([])
@@ -144,11 +152,83 @@ export default function Landing({ user }) {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // Load custom runways on mount
+  // Load custom runways on mount and when user changes
   useEffect(() => {
-    const loaded = loadCustomRunways()
-    setCustomRunways(loaded)
-  }, [])
+    async function loadRunways() {
+      const loaded = await loadCustomRunways(user)
+      setCustomRunways(loaded)
+    }
+    loadRunways()
+  }, [user])
+
+  // Load saved landing paths for current runway
+  useEffect(() => {
+    async function loadLandingPaths() {
+      if (!user || !selectedRunway) return
+      
+      try {
+        const { data, error } = await supabase
+          .from('landing_paths')
+          .select('id, path_name, path_data, created_at, user_id')
+          .eq('runway_id', selectedRunway)
+          .order('created_at', { ascending: false })
+          .limit(50)
+        
+        if (error) {
+          console.error('Error loading landing paths:', error)
+        } else {
+          setSavedLandingPaths(data || [])
+        }
+      } catch (error) {
+        console.error('Error loading landing paths:', error)
+      }
+    }
+    loadLandingPaths()
+  }, [user, selectedRunway])
+
+  // Save current flight path as a landing path
+  async function saveCurrentPath() {
+    if (!user || !selectedRunway || flightPath.length < 10) {
+      alert('Not enough flight path data to save. Need at least 10 points.')
+      return
+    }
+    
+    if (!savePathName.trim()) {
+      alert('Please enter a name for this landing path')
+      return
+    }
+    
+    try {
+      const { error } = await supabase
+        .from('landing_paths')
+        .insert({
+          user_id: user.id,
+          runway_id: selectedRunway,
+          path_name: savePathName.trim(),
+          path_data: flightPath
+        })
+      
+      if (error) {
+        console.error('Error saving landing path:', error)
+        alert('Error saving landing path: ' + error.message)
+      } else {
+        alert('Landing path saved successfully!')
+        setShowSavePathDialog(false)
+        setSavePathName('')
+        // Reload paths
+        const { data } = await supabase
+          .from('landing_paths')
+          .select('id, path_name, path_data, created_at, user_id')
+          .eq('runway_id', selectedRunway)
+          .order('created_at', { ascending: false })
+          .limit(50)
+        setSavedLandingPaths(data || [])
+      }
+    } catch (error) {
+      console.error('Error saving landing path:', error)
+      alert('Error saving landing path')
+    }
+  }
 
   const runway = useMemo(() => {
     // Check if selected runway is a custom runway
@@ -177,6 +257,40 @@ export default function Landing({ user }) {
       setState('disconnected')
     }
   }, [connected, state])
+
+  // Landing path recording logic (independent of landing tracking)
+  useEffect(() => {
+    if (!data || !connected || !recordingPath || !runway) return
+
+    // Capture flight path for landing path recording (sample every ~0.5 seconds, only when airborne and moving)
+    const isAirborne = !data.on_ground
+    const isMoving = (data.ias_kt || 0) > 30 // Only record when moving faster than 30 knots
+    
+    if (isAirborne && isMoving) {
+      const now = Date.now()
+      setPathRecording(prev => {
+        const lastSample = prev[prev.length - 1]
+        if (!lastSample || now - lastSample.timestamp >= 500) {
+          const newPoint = {
+            timestamp: now,
+            lat: data.lat,
+            lon: data.lon,
+            alt: data.alt_ft,
+            heading: data.hdg_true,
+            bank: data.bank_deg || 0,
+            airspeed: data.ias_kt,
+            pitch: data.pitch_deg || 0,
+            vs_fpm: data.vs_fpm
+          }
+          const newPath = [...prev, newPoint]
+          pathRecordingRef.current = newPath // Update ref with latest path
+          console.log('Recording path point:', newPoint, 'Total points:', newPath.length)
+          return newPath
+        }
+        return prev
+      })
+    }
+  }, [data, connected, recordingPath, runway])
 
   // Main tracking logic
   useEffect(() => {
@@ -325,6 +439,122 @@ export default function Landing({ user }) {
     setCurrentPhase(LANDING_PHASES.NONE)
   }
 
+  function startPathRecording() {
+    if (!runway) {
+      alert('Please select a runway first')
+      return
+    }
+    setRecordingPath(true)
+    setPathRecording([])
+    pathRecordingRef.current = [] // Clear ref too
+    console.log('Started recording landing path')
+  }
+
+  function stopPathRecording() {
+    // Use ref to get the most current path data
+    const currentPath = [...pathRecordingRef.current]
+    console.log('Stopping path recording. Points recorded (state):', pathRecording.length, 'Points recorded (ref):', currentPath.length)
+    setRecordingPath(false)
+    
+    if (currentPath.length >= 10) {
+      console.log('Enough points, showing save dialog. Points:', currentPath.length)
+      // Ensure state is synced with ref
+      setPathRecording(currentPath)
+      setIsSavingRecordedPath(true)
+      setShowSavePathDialog(true)
+    } else {
+      console.log('Not enough points:', currentPath.length)
+      alert(`Not enough path data recorded. Need at least 10 points. You have ${currentPath.length} points.`)
+      setPathRecording([])
+      pathRecordingRef.current = []
+    }
+  }
+
+  async function saveRecordedPath() {
+    // Use ref to get the most current path data, fallback to state
+    const pathToSave = pathRecordingRef.current.length > 0 ? [...pathRecordingRef.current] : [...pathRecording]
+    
+    console.log('saveRecordedPath called. Points:', pathToSave.length, 'Name:', savePathName, 'User:', user?.id, 'Runway:', selectedRunway)
+    console.log('pathRecording state length:', pathRecording.length)
+    console.log('pathRecordingRef length:', pathRecordingRef.current.length)
+    console.log('pathToSave length:', pathToSave.length)
+    
+    if (!user) {
+      alert('You must be logged in to save a landing path.')
+      console.error('No user found')
+      return
+    }
+    
+    if (!selectedRunway) {
+      alert('No runway selected.')
+      console.error('No runway selected')
+      return
+    }
+    
+    if (pathToSave.length < 10) {
+      alert(`Not enough path data to save. Need at least 10 points. You have ${pathToSave.length} points.`)
+      console.error('Not enough points:', pathToSave.length, 'State length:', pathRecording.length)
+      return
+    }
+    
+    if (!savePathName.trim()) {
+      alert('Please enter a name for this landing path')
+      console.error('No path name provided')
+      return
+    }
+    
+    try {
+      console.log('Saving to database:', {
+        user_id: user.id,
+        runway_id: selectedRunway,
+        path_name: savePathName.trim(),
+        path_data_length: pathToSave.length,
+        path_data_sample: pathToSave.slice(0, 2)
+      })
+      
+      const { data: savedData, error } = await supabase
+        .from('landing_paths')
+        .insert({
+          user_id: user.id,
+          runway_id: selectedRunway,
+          path_name: savePathName.trim(),
+          path_data: pathToSave
+        })
+        .select()
+      
+      if (error) {
+        console.error('Error saving landing path:', error)
+        alert('Error saving landing path: ' + error.message)
+        return
+      }
+      
+      console.log('Successfully saved landing path:', savedData)
+      alert('Landing path saved successfully!')
+      setShowSavePathDialog(false)
+      setSavePathName('')
+      setIsSavingRecordedPath(false)
+      setPathRecording([])
+      
+      // Reload paths
+      const { data: reloadedPaths, error: reloadError } = await supabase
+        .from('landing_paths')
+        .select('id, path_name, path_data, created_at, user_id')
+        .eq('runway_id', selectedRunway)
+        .order('created_at', { ascending: false })
+        .limit(50)
+      
+      if (reloadError) {
+        console.error('Error reloading paths:', reloadError)
+      } else {
+        console.log('Reloaded paths:', reloadedPaths?.length)
+        setSavedLandingPaths(reloadedPaths || [])
+      }
+    } catch (error) {
+      console.error('Exception saving landing path:', error)
+      alert('Error saving landing path: ' + (error.message || 'Unknown error'))
+    }
+  }
+
   function completeLanding() {
     if (!hasBeenSaved.current) {
       hasBeenSaved.current = true
@@ -381,9 +611,9 @@ export default function Landing({ user }) {
     touchdownData.current = null
   }
 
-  function handleCalibrationComplete(newRunway) {
+  async function handleCalibrationComplete(newRunway) {
     // Reload custom runways
-    const loaded = loadCustomRunways()
+    const loaded = await loadCustomRunways(user)
     setCustomRunways(loaded)
     // Select the newly created runway
     setSelectedRunway(newRunway.id)
@@ -456,11 +686,23 @@ export default function Landing({ user }) {
 
               <button
                 className={`big-button ${tracking ? 'stop' : 'start'}`}
-                disabled={state === 'disconnected' || state === 'complete'}
+                disabled={state === 'disconnected' || state === 'complete' || recordingPath}
                 onClick={tracking ? stopTracking : startTracking}
               >
                 {tracking ? 'Stop Tracking' : 'Start Tracking'}
               </button>
+              {recordingPath && (
+                <div style={{ 
+                  padding: '8px', 
+                  backgroundColor: '#ffa50020', 
+                  borderRadius: '4px', 
+                  marginTop: '8px',
+                  fontSize: '12px',
+                  color: '#ffa500'
+                }}>
+                  ⚠️ Landing path recording is active. Stop recording to start landing tracking.
+                </div>
+              )}
 
               <div className="config-section">
                 <label>
@@ -550,6 +792,53 @@ export default function Landing({ user }) {
                   </div>
                 </label>
 
+                <label>
+                  Landing Path (Optional)
+                  <select
+                    value={selectedLandingPath || ''}
+                    onChange={(e) => setSelectedLandingPath(e.target.value || null)}
+                    disabled={tracking || recordingPath}
+                    style={{ width: '100%', padding: '8px', marginTop: '4px' }}
+                  >
+                    <option value="">None (No reference path)</option>
+                    {savedLandingPaths.map(path => (
+                      <option key={path.id} value={path.id}>
+                        {path.path_name} {path.user_id === user?.id ? '(You)' : '(Shared)'}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div style={{ marginTop: '12px', padding: '12px', backgroundColor: '#1a1a1a', borderRadius: '4px', border: recordingPath ? '2px solid #ffa500' : '1px solid #333' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <span style={{ fontWeight: 'bold' }}>Record Landing Path</span>
+                    {recordingPath && (
+                      <span style={{ color: '#ffa500', fontSize: '12px' }}>● Recording...</span>
+                    )}
+                  </div>
+                  <p style={{ fontSize: '12px', color: '#aaa', marginBottom: '8px' }}>
+                    Record a flight path independently of landing tracking. The path will be saved for the selected runway.
+                  </p>
+                  {!recordingPath ? (
+                    <button
+                      className="btn-secondary"
+                      onClick={startPathRecording}
+                      disabled={tracking || !connected}
+                      style={{ width: '100%' }}
+                    >
+                      Start Recording Path
+                    </button>
+                  ) : (
+                    <button
+                      className="btn-primary"
+                      onClick={stopPathRecording}
+                      style={{ width: '100%', backgroundColor: '#ff4444' }}
+                    >
+                      Stop Recording ({pathRecording.length} points)
+                    </button>
+                  )}
+                </div>
+
                 <button
                   className="btn-calibrate"
                   onClick={() => setShowCalibration(true)}
@@ -622,6 +911,7 @@ export default function Landing({ user }) {
                     currentPhase={currentPhase}
                     glidepathDeviation={glidepathDeviation}
                     distanceToThreshold={distanceToThreshold}
+                    selectedLandingPath={selectedLandingPath ? savedLandingPaths.find(p => p.id === selectedLandingPath)?.path_data : null}
                   />
                 </div>
 
@@ -755,6 +1045,41 @@ export default function Landing({ user }) {
           </div>
         </div>
       </div>
+
+      {/* Save Landing Path Dialog */}
+      {showSavePathDialog && (
+        <div className="modal-overlay" onClick={() => setShowSavePathDialog(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2>Save Landing Path</h2>
+            <p>Save your current flight path as a reference for future landings.</p>
+            <label>
+              Path Name
+              <input
+                type="text"
+                value={savePathName}
+                onChange={(e) => setSavePathName(e.target.value)}
+                placeholder="e.g., Standard Approach, Practice Run 1"
+                style={{ width: '100%', padding: '8px', marginTop: '4px' }}
+              />
+            </label>
+            <div style={{ marginTop: '16px', display: 'flex', gap: '8px' }}>
+              <button className="btn-primary" onClick={isSavingRecordedPath ? saveRecordedPath : saveCurrentPath}>
+                Save
+              </button>
+              <button className="btn-secondary" onClick={() => {
+                setShowSavePathDialog(false)
+                setSavePathName('')
+                setIsSavingRecordedPath(false)
+                if (isSavingRecordedPath) {
+                  setPathRecording([])
+                }
+              }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

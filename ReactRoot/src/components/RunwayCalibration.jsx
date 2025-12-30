@@ -5,11 +5,76 @@ import './RunwayCalibration.css'
 
 const STORAGE_KEY = 'custom_runways'
 
-// Load custom runways from localStorage
-export function loadCustomRunways() {
+// Load custom runways from localStorage and database (including connected users)
+export async function loadCustomRunways(user = null) {
   try {
+    // Load from localStorage first
     const stored = localStorage.getItem(STORAGE_KEY)
-    return stored ? JSON.parse(stored) : []
+    const localRunways = stored ? JSON.parse(stored) : []
+    
+    // If user is provided, also load from database (own + connected users)
+    if (user) {
+      try {
+        // Get accepted connections (both as student and instructor)
+        const { data: relationships, error: relError } = await supabase
+          .from('instructor_relationships')
+          .select('student_id, instructor_id, status')
+          .or(`and(student_id.eq.${user.id},status.eq.accepted),and(instructor_id.eq.${user.id},status.eq.accepted)`)
+        
+        if (relError) {
+          console.error('Error loading relationships:', relError)
+        } else {
+          // Collect all connected user IDs
+          const connectedUserIds = new Set([user.id]) // Include own runways
+          relationships?.forEach(rel => {
+            if (rel.student_id === user.id) {
+              connectedUserIds.add(rel.instructor_id)
+            } else if (rel.instructor_id === user.id) {
+              connectedUserIds.add(rel.student_id)
+            }
+          })
+          
+          // Load runways from all connected users
+          const { data: dbRunways, error: dbError } = await supabase
+            .from('custom_runways')
+            .select('user_id, runway_data, runway_name, created_at')
+            .in('user_id', Array.from(connectedUserIds))
+            .order('created_at', { ascending: false })
+          
+          if (dbError) {
+            console.error('Error loading runways from database:', dbError)
+          } else if (dbRunways) {
+            // Convert database runways to format expected by the app
+            const dbRunwaysFormatted = dbRunways.map(r => ({
+              ...r.runway_data,
+              id: r.runway_data.id || `db_${r.user_id}_${r.runway_name}`,
+              fromDatabase: true,
+              ownerId: r.user_id,
+              ownerName: r.user_id === user.id ? 'You' : 'Connected User'
+            }))
+            
+            // Merge with local runways, avoiding duplicates
+            const mergedRunways = [...localRunways]
+            dbRunwaysFormatted.forEach(dbRwy => {
+              // Check if already exists (by name or id)
+              const exists = mergedRunways.some(localRwy => 
+                localRwy.id === dbRwy.id || 
+                (localRwy.name === dbRwy.name && localRwy.threshold?.lat === dbRwy.threshold?.lat)
+              )
+              if (!exists) {
+                mergedRunways.push(dbRwy)
+              }
+            })
+            
+            return mergedRunways
+          }
+        }
+      } catch (error) {
+        console.error('Error loading runways from database:', error)
+      }
+    }
+    
+    return localRunways
   } catch (error) {
     console.error('Error loading custom runways:', error)
     return []
