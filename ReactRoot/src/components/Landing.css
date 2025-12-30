@@ -1,7 +1,7 @@
 .landing-page {
   min-height: 100vh;
   background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
-  padding: 20px;
+  padding: var(--padding-page);
   color: #fff;
 }
 
@@ -11,8 +11,8 @@
 }
 
 .landing-container h1 {
-  font-size: 2.5rem;
-  margin-bottom: 8px;
+  font-size: clamp(1.5rem, 2.5rem, var(--font-size-h1));
+  margin-bottom: var(--gap-sm);
   background: linear-gradient(135deg, #4a9eff 0%, #00d4ff 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
@@ -21,14 +21,14 @@
 
 .landing-container .subtitle {
   color: #aaa;
-  margin-bottom: 24px;
-  font-size: 1.1rem;
+  margin-bottom: var(--gap-2xl);
+  font-size: var(--font-size-body);
 }
 
 .landing-grid {
   display: grid;
   grid-template-columns: 400px 1fr;
-  gap: 20px;
+  gap: var(--spacing-xl);
   align-items: start;
 }
 
@@ -38,19 +38,54 @@
   }
 }
 
+@media (max-width: 1024px) {
+  .live-values {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .live-values {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .gate-details {
+    flex-direction: column;
+    gap: var(--spacing-xs);
+  }
+
+  .violations-list {
+    max-height: 250px;
+  }
+}
+
+@media (max-width: 480px) {
+  .live-values {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .violations-list {
+    max-height: 200px;
+  }
+
+  .modal-content {
+    max-width: 100%;
+  }
+}
+
 .left-col,
 .right-col {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--spacing-lg);
 }
 
 .card {
   background: rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  padding: 20px;
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-xl);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
   position: relative;
 }
@@ -60,25 +95,25 @@
 }
 
 .card h2 {
-  margin: 0 0 16px 0;
-  font-size: 1.3rem;
+  margin: 0 0 var(--spacing-lg) 0;
+  font-size: var(--font-size-h2);
   color: #fff;
 }
 
 .card h3 {
-  margin: 16px 0 8px 0;
-  font-size: 1.1rem;
+  margin: var(--spacing-lg) 0 var(--gap-sm) 0;
+  font-size: var(--font-size-h3);
   color: #ddd;
 }
 
 /* Status Badge */
 .status-badge {
   display: inline-block;
-  padding: 8px 16px;
+  padding: var(--gap-sm) var(--spacing-lg);
   border-radius: 20px;
   font-weight: 600;
-  font-size: 0.9rem;
-  margin-bottom: 16px;
+  font-size: var(--font-size-small);
+  margin-bottom: var(--spacing-lg);
 }
 
 .status-badge.disconnected {
@@ -118,14 +153,14 @@
 /* Buttons */
 .big-button {
   width: 100%;
-  padding: 16px;
-  font-size: 1.1rem;
+  padding: var(--spacing-lg);
+  font-size: var(--font-size-body);
   font-weight: 600;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--border-radius-md);
   cursor: pointer;
   transition: all 0.2s;
-  margin-bottom: 16px;
+  margin-bottom: var(--spacing-lg);
 }
 
 .big-button.start {
@@ -167,24 +202,24 @@
 .config-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--spacing-md);
 }
 
 .config-section label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  font-size: 0.9rem;
+  gap: var(--spacing-xs);
+  font-size: var(--font-size-small);
   color: #ccc;
 }
 
 .config-section input {
-  padding: 10px;
+  padding: var(--spacing-sm);
   background: rgba(255, 255, 255, 0.1);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 6px;
+  border-radius: var(--border-radius-sm);
   color: #fff;
-  font-size: 1rem;
+  font-size: var(--font-size-base);
 }
 
 .config-section input:focus {

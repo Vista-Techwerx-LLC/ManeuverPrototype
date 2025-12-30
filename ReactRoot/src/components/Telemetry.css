@@ -1,6 +1,6 @@
 .telemetry-page {
   min-height: 100vh;
-  padding: 24px;
+  padding: var(--padding-page);
   background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
   color: #fff;
 }
@@ -11,26 +11,26 @@
 }
 
 .telemetry-page h1 {
-  font-size: 28px;
-  margin-bottom: 8px;
+  font-size: var(--font-size-h1);
+  margin-bottom: var(--gap-sm);
 }
 
 .subtitle {
   color: var(--text-muted);
-  margin-bottom: 24px;
-  font-size: 14px;
+  margin-bottom: var(--gap-2xl);
+  font-size: var(--font-size-small);
 }
 
 .telemetry-status {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: var(--gap-sm);
+  padding: var(--spacing-md) var(--spacing-lg);
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 24px;
-  font-size: 14px;
+  border-radius: var(--border-radius-md);
+  margin-bottom: var(--gap-2xl);
+  font-size: var(--font-size-small);
 }
 
 .status-dot {
@@ -46,7 +46,7 @@
 
 .telemetry-content {
   display: flex;
-  gap: 24px;
+  gap: var(--gap-2xl);
   flex-wrap: wrap;
 }
 
@@ -54,8 +54,8 @@
 .readouts-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
+  border-radius: var(--border-radius-lg);
+  padding: var(--spacing-xl);
 }
 
 .instrument-card {
@@ -73,8 +73,8 @@
 .readouts-card h2,
 .instrument-card h3,
 .readouts-card h3 {
-  font-size: 16px;
-  margin-bottom: 16px;
+  font-size: var(--font-size-h3);
+  margin-bottom: var(--spacing-lg);
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -170,8 +170,8 @@
 .readouts-grid {
   display: grid;
   grid-template-columns: 140px 1fr;
-  gap: 8px 12px;
-  font-size: 15px;
+  gap: var(--gap-sm) var(--spacing-md);
+  font-size: var(--font-size-body);
 }
 
 .readouts-grid > div:nth-child(odd) {
@@ -181,6 +181,87 @@
 .readouts-grid > div:nth-child(even) {
   font-family: 'Consolas', monospace;
   font-weight: 600;
+}
+
+@media (max-width: 1024px) {
+  .telemetry-content {
+    flex-direction: column;
+  }
+
+  .instrument-card,
+  .readouts-card {
+    min-width: 100%;
+    max-width: 100%;
+  }
+
+  .horizon-wrap {
+    width: 300px;
+    height: 300px;
+  }
+
+  .world {
+    width: 600px;
+    height: 600px;
+  }
+}
+
+@media (max-width: 768px) {
+  .horizon-wrap {
+    width: 250px;
+    height: 250px;
+    border-width: 8px;
+  }
+
+  .world {
+    width: 500px;
+    height: 500px;
+  }
+
+  .aircraft {
+    width: 120px;
+    height: 35px;
+  }
+
+  .readouts-grid {
+    grid-template-columns: 120px 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .status-dot {
+    width: 8px;
+    height: 8px;
+  }
+
+  .horizon-wrap {
+    width: 200px;
+    height: 200px;
+    border-width: 6px;
+  }
+
+  .world {
+    width: 400px;
+    height: 400px;
+  }
+
+  .aircraft {
+    width: 100px;
+    height: 30px;
+  }
+
+  .wing {
+    width: 45px;
+    height: 3px;
+  }
+
+  .center {
+    width: 12px;
+    height: 12px;
+  }
+
+  .readouts-grid {
+    grid-template-columns: 100px 1fr;
+  }
 }
 
 

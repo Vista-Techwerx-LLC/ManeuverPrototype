@@ -1,5 +1,5 @@
 .runway-calibration {
-  padding: 20px;
+  padding: var(--spacing-xl);
 }
 
 .calibration-container {
@@ -8,20 +8,20 @@
   background: rgba(255, 255, 255, 0.05);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  padding: 24px;
+  border-radius: var(--border-radius-lg);
+  padding: var(--padding-card);
 }
 
 .calibration-container h2 {
-  margin: 0 0 8px 0;
-  font-size: 1.8rem;
+  margin: 0 0 var(--gap-sm) 0;
+  font-size: var(--font-size-h1);
   color: #fff;
 }
 
 .calibration-container .subtitle {
   color: #aaa;
-  margin-bottom: 24px;
-  font-size: 0.95rem;
+  margin-bottom: var(--gap-2xl);
+  font-size: var(--font-size-body);
 }
 
 .calibration-step {
@@ -222,5 +222,17 @@
   border-radius: 6px;
   color: #ffaa77;
   font-size: 0.9rem;
+}
+
+@media (max-width: 768px) {
+  .button-group {
+    flex-direction: column;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-cancel {
+    width: 100%;
+  }
 }
 

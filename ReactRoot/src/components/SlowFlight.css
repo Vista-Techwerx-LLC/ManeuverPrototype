@@ -1,6 +1,6 @@
 .slow-flight-page {
   min-height: 100vh;
-  padding: 24px;
+  padding: var(--padding-page);
   background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
   color: #fff;
 }
@@ -11,26 +11,46 @@
 }
 
 .slow-flight-page h1 {
-  margin: 0 0 8px 0;
-  font-size: 28px;
+  margin: 0 0 var(--gap-sm) 0;
+  font-size: var(--font-size-h1);
   font-weight: 600;
 }
 
 .slow-flight-page .subtitle {
   color: var(--text-muted);
-  margin-bottom: 24px;
-  font-size: 14px;
+  margin-bottom: var(--gap-2xl);
+  font-size: var(--font-size-small);
 }
 
 .slow-flight-grid {
   display: grid;
   grid-template-columns: 340px 1fr;
-  gap: 24px;
+  gap: var(--gap-2xl);
 }
 
 @media (max-width: 800px) {
   .slow-flight-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .entry-values {
+    grid-template-columns: 1fr;
+  }
+
+  .live-values {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .tolerance-bar {
+    height: 6px;
+  }
+
+  .live-values {
+    grid-template-columns: repeat(2, 1fr);
   }
 }
 
