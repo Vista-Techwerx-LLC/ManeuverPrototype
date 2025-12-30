@@ -5,7 +5,7 @@ import './FlightPath3D.css'
 // Track component instances
 let instanceCounter = 0
 
-export default function FlightPath3D({ flightPath, entry }) {
+export default function FlightPath3D({ flightPath, entry, referencePath }) {
   const instanceId = useRef(++instanceCounter)
   const containerRef = useRef(null)
   const sceneRef = useRef(null)
@@ -534,6 +534,59 @@ export default function FlightPath3D({ flightPath, entry }) {
     }
 
     scene.add(pathGroup)
+
+    // Draw reference path if provided (for path following comparison)
+    if (referencePath && referencePath.length > 0) {
+      const referencePathGroup = new THREE.Group()
+      referencePathGroup.name = 'referencePath'
+      
+      // Use same origin as user's path for proper alignment
+      const refPathPoints = []
+      
+      referencePath.forEach((point) => {
+        if (point.lat == null || point.lon == null || point.alt == null) return
+        
+        const x = (point.lon - originLon) * lonToMeters
+        const z = -(point.lat - originLat) * latToMeters
+        const y = (point.alt - originAlt) * 0.3048
+        
+        refPathPoints.push(new THREE.Vector3(x, y, z))
+      })
+      
+      if (refPathPoints.length >= 2) {
+        // Create reference path as a tube (orange, slightly thinner, dashed appearance)
+        const refCurve = new THREE.CatmullRomCurve3(refPathPoints, false, 'centripetal')
+        const refGeometry = new THREE.TubeGeometry(refCurve, Math.max(refPathPoints.length * 2, 20), 12, 8, false)
+        
+        const refMaterial = new THREE.MeshStandardMaterial({
+          color: 0xffa500, // Orange
+          emissive: 0xaa5500,
+          emissiveIntensity: 0.3,
+          metalness: 0.1,
+          roughness: 0.7,
+          transparent: true,
+          opacity: 0.7
+        })
+        
+        const refPathMesh = new THREE.Mesh(refGeometry, refMaterial)
+        refPathMesh.castShadow = false
+        refPathMesh.receiveShadow = false
+        referencePathGroup.add(refPathMesh)
+        
+        // Also add a line for better visibility
+        const refLineGeometry = new THREE.BufferGeometry().setFromPoints(refPathPoints)
+        const refLineMaterial = new THREE.LineBasicMaterial({
+          color: 0xffa500,
+          linewidth: 2,
+          transparent: true,
+          opacity: 0.5
+        })
+        const refLine = new THREE.Line(refLineGeometry, refLineMaterial)
+        referencePathGroup.add(refLine)
+        
+        scene.add(referencePathGroup)
+      }
+    }
 
     // Create hover point spheres for mouse tracking (optimized)
     const pointSpheres = []

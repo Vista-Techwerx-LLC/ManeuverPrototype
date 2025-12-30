@@ -469,6 +469,28 @@
   margin-top: 4px;
 }
 
+.live-item .tolerance {
+  font-size: 0.65rem;
+  color: #666;
+  margin-top: 2px;
+}
+
+.live-item .val.bad {
+  color: #ff4444;
+}
+
+.live-item .val.good {
+  color: #00ff88;
+}
+
+.detail-row .good {
+  color: #00ff88;
+}
+
+.detail-row .bad {
+  color: #ff4444;
+}
+
 /* Phase Standards */
 .standards-list {
   font-size: 0.95rem;
