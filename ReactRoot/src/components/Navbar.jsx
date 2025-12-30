@@ -79,7 +79,7 @@ export default function Navbar({ user }) {
             to="/friends" 
             className={isActive('/friends') ? 'active' : ''}
           >
-            Friends
+            Instructor Portal
           </Link>
         </div>
 

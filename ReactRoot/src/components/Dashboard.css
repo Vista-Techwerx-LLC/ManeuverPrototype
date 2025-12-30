@@ -1,6 +1,8 @@
 .dashboard {
-  flex: 1;
-  padding: 40px 24px;
+  min-height: 100vh;
+  padding: 24px;
+  background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
+  color: #fff;
 }
 
 .dashboard-container {

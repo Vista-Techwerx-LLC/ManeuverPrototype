@@ -1,7 +1,27 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { fetchSteepTurnFeedback } from '../lib/aiFeedback'
 import FlightPath3D from './FlightPath3D'
+import { getSteepTurnPassTolerances, SKILL_LEVELS } from '../utils/autoStartTolerances'
+import { getGradeColorClass } from '../utils/steepTurnGrading'
 import './History.css'
+
+function getManeuverGrade(maneuver) {
+  const finalGrade = maneuver.result_data?.gradeDetails?.finalGrade
+  if (finalGrade) {
+    return finalGrade
+  }
+  if (maneuver.grade && (maneuver.grade !== 'PASS' && maneuver.grade !== 'FAIL')) {
+    return maneuver.grade
+  }
+  return maneuver.grade === 'PASS' ? 'PASS' : 'FAIL'
+}
+
+function isFailGrade(grade) {
+  if (!grade) return true
+  const gradeUpper = grade.toUpperCase()
+  return gradeUpper === 'FAIL' || gradeUpper === 'F' || gradeUpper.startsWith('D')
+}
 
 export default function History({ user }) {
   const [maneuvers, setManeuvers] = useState([])
@@ -54,16 +74,17 @@ export default function History({ user }) {
   }
 
   const filteredManeuvers = maneuvers.filter(m => {
+    const gradeText = getManeuverGrade(m)
     if (filter === 'all') return true
-    if (filter === 'pass') return m.grade === 'PASS'
-    if (filter === 'fail') return m.grade === 'FAIL'
+    if (filter === 'pass') return !isFailGrade(gradeText)
+    if (filter === 'fail') return isFailGrade(gradeText)
     return true
   })
 
   const stats = {
     total: maneuvers.length,
-    passed: maneuvers.filter(m => m.grade === 'PASS').length,
-    failed: maneuvers.filter(m => m.grade === 'FAIL').length
+    passed: maneuvers.filter(m => !isFailGrade(getManeuverGrade(m))).length,
+    failed: maneuvers.filter(m => isFailGrade(getManeuverGrade(m))).length
   }
 
   if (loading) {
@@ -151,20 +172,149 @@ export default function History({ user }) {
   )
 }
 
+async function updateManeuverWithFeedback(maneuverId, feedback) {
+  if (!maneuverId) return false
+  
+  try {
+    const { data: existingData, error: fetchError } = await supabase
+      .from('maneuver_results')
+      .select('result_data')
+      .eq('id', maneuverId)
+      .single()
+    
+    if (fetchError || !existingData) {
+      console.error('Error fetching maneuver data:', fetchError)
+      return false
+    }
+    
+    const updatedResultData = {
+      ...existingData.result_data,
+      ai_feedback: feedback
+    }
+    
+    const { error } = await supabase
+      .from('maneuver_results')
+      .update({ result_data: updatedResultData })
+      .eq('id', maneuverId)
+    
+    if (error) {
+      console.error('Error updating maneuver with feedback:', error)
+      return false
+    }
+    
+    return true
+  } catch (error) {
+    console.error('Error updating maneuver with feedback:', error)
+    return false
+  }
+}
+
 function ManeuverCard({ maneuver, onDelete }) {
   const [expanded, setExpanded] = useState(false)
+  const [aiFeedback, setAiFeedback] = useState('')
+  const [aiFocus, setAiFocus] = useState('Altitude')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState('')
+  const [showAllTips, setShowAllTips] = useState(false)
   const details = maneuver.result_data
-  const isPassed = maneuver.grade === 'PASS'
+  const gradeText = getManeuverGrade(maneuver)
+  const isPassed = !isFailGrade(gradeText)
   const date = new Date(maneuver.created_at)
   const skillLevel = maneuver.skill_level
+
+  useEffect(() => {
+    if (expanded && details?.ai_feedback) {
+      const feedback = details.ai_feedback
+      const focusMatch = feedback.match(/^FOCUS:\s*(.+?)(?:\n|$)/i)
+      if (focusMatch) {
+        setAiFocus(focusMatch[1].trim())
+        setAiFeedback(feedback.replace(/^FOCUS:\s*.+?\n/i, '').trim())
+      } else {
+        setAiFocus('Altitude')
+        setAiFeedback(feedback)
+      }
+    } else if (expanded && !details?.ai_feedback) {
+      setAiFeedback('')
+      setAiFocus('Altitude')
+      setAiError('')
+    }
+  }, [expanded, details?.ai_feedback])
 
   const formatSkillLevel = (level) => {
     if (!level) return null
     return level.charAt(0).toUpperCase() + level.slice(1)
   }
 
+  async function handleAiFeedbackRequest() {
+    if (aiFeedback) {
+      return
+    }
+
+    if (maneuver.maneuver_type !== 'steep_turn') {
+      setAiError('AI feedback is only available for steep turn maneuvers')
+      return
+    }
+
+    setAiLoading(true)
+    setAiError('')
+
+    try {
+    const payload = {
+      grade: gradeText,
+        gradeDetails: details.gradeDetails || null,
+        details: {
+          entry: details.entry,
+          deviations: details.deviations,
+          averages: details.averages,
+          busted: details.busted,
+          turnDirection: details.turnDirection,
+          totalTurn: details.totalTurn,
+          autoStart: details.autoStart,
+          timestamp: details.timestamp
+        }
+      }
+
+      const result = await fetchSteepTurnFeedback({
+        maneuver: payload,
+        maneuverType: 'steep_turn',
+        user: {
+          id: maneuver.user_id,
+          email: null
+        }
+      })
+      
+      if (typeof result === 'object' && result.focus && result.feedback) {
+        setAiFocus(result.focus)
+        setAiFeedback(result.feedback)
+        const feedbackToSave = `FOCUS: ${result.focus}\n\n${result.feedback}`
+        await updateManeuverWithFeedback(maneuver.id, feedbackToSave)
+        if (details) {
+          details.ai_feedback = feedbackToSave
+        }
+      } else {
+        const feedbackText = typeof result === 'string' ? result : JSON.stringify(result)
+        const focusMatch = feedbackText.match(/^FOCUS:\s*(.+?)(?:\n|$)/i)
+        if (focusMatch) {
+          setAiFocus(focusMatch[1].trim())
+          setAiFeedback(feedbackText.replace(/^FOCUS:\s*.+?\n/i, '').trim())
+        } else {
+          setAiFocus('Altitude')
+          setAiFeedback(feedbackText)
+        }
+        await updateManeuverWithFeedback(maneuver.id, feedbackText)
+        if (details) {
+          details.ai_feedback = feedbackText
+        }
+      }
+    } catch (error) {
+      setAiError(error.message || 'Unable to get AI feedback')
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
   return (
-    <div className={`maneuver-card ${isPassed ? 'pass' : 'fail'}`}>
+    <div className={`maneuver-card ${getGradeColorClass(gradeText)}`}>
       <div className="maneuver-header" onClick={() => setExpanded(!expanded)}>
         <div className="maneuver-info">
           <div className="maneuver-type">
@@ -179,15 +329,138 @@ function ManeuverCard({ maneuver, onDelete }) {
             {date.toLocaleDateString()} {date.toLocaleTimeString()}
           </div>
         </div>
-        <div className="maneuver-grade-badge">
-          <span className={`grade-text ${isPassed ? 'pass' : 'fail'}`}>
-            {maneuver.grade}
-          </span>
-        </div>
+          <div className="maneuver-grade-badge">
+            <span className={`grade-text ${getGradeColorClass(gradeText)}`}>
+              {gradeText}
+            </span>
+          </div>
       </div>
 
       {expanded && details && (
         <div className="maneuver-details">
+          {maneuver.maneuver_type === 'steep_turn' && (
+            <div className="details-section">
+              <div className="ai-feedback">
+                <div className="ai-feedback-header">
+                  <div className="ai-title-group">
+                    <div className="ai-title">AI Debrief</div>
+                    <svg className="ai-title-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M7.775 3.275a.75.75 0 001.06 1.06l1.25-1.25a2 2 0 112.83 2.83l-2.5 2.5a2 2 0 01-2.83 0 .75.75 0 00-1.06 1.06 3.5 3.5 0 004.95 0l2.5-2.5a3.5 3.5 0 00-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 010-2.83l2.5-2.5a2 2 0 012.83 0 .75.75 0 001.06-1.06 3.5 3.5 0 00-4.95 0l-2.5 2.5a3.5 3.5 0 004.95 4.95l1.25-1.25a.75.75 0 00-1.06-1.06l-1.25 1.25a2 2 0 01-2.83 0z"/>
+                    </svg>
+                    <svg className="ai-title-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                      <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8zM5 12.25v3.25a.25.25 0 00.4.2l1.45-1.087a.25.25 0 01.3 0L8.6 15.7a.25.25 0 00.4-.2v-3.25a.25.25 0 00-.25-.25h-3.5a.25.25 0 00-.25.25z"/>
+                    </svg>
+                  </div>
+                  {!aiFeedback && (
+                    <div className="ai-header-actions">
+                      <button className="ai-feedback-button" onClick={handleAiFeedbackRequest} disabled={aiLoading}>
+                        {aiLoading ? 'Requesting...' : 'Get AI Feedback'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                
+                {aiError && <div className="ai-feedback-error">{aiError}</div>}
+                
+                {aiFeedback && (
+                  <div className="ai-feedback-content">
+                    <div className="ai-overall-focus">
+                      <div className="ai-overall-focus-label">Overall Focus</div>
+                      <div className="ai-overall-focus-value">
+                        {aiFocus} →
+                      </div>
+                    </div>
+                    
+                    <div className="ai-corrections-section">
+                      <div className="ai-corrections-title">
+                        Top Corrections ({aiFeedback.split('\n').filter(line => {
+                          const trimmed = line.trim();
+                          return trimmed && (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.match(/^\d+[\.\)]/));
+                        }).length || 0})
+                      </div>
+                      <div className="ai-corrections-list">
+                        {aiFeedback.split('\n').filter(line => {
+                          const trimmed = line.trim();
+                          return trimmed && (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.match(/^\d+[\.\)]/));
+                        }).slice(0, showAllTips ? undefined : 3).map((line, idx) => {
+                          const trimmed = line.replace(/^[•\-\d+\.\)]\s*/, '').trim();
+                          const isHigh = trimmed.toLowerCase().includes('high') || idx === 0;
+                          const isMed = trimmed.toLowerCase().includes('med') || idx === 1;
+                          const priority = isHigh ? 'high' : isMed ? 'med' : 'low';
+                          const categoryMatch = trimmed.match(/(HIGH|MED|LOW)\s*-\s*(\w+)/i);
+                          const category = categoryMatch ? categoryMatch[2] : ['ENTRY', 'PITCH', 'AIRSPEED', 'BANK', 'ROLLOUT'][idx] || 'GENERAL';
+                          
+                          const parts = trimmed.split(/[\.:]/);
+                          const instruction = parts[0] || trimmed;
+                          const cue = parts.slice(1).join('.').trim();
+                          
+                          return (
+                            <div key={idx} className={`ai-correction-item ${priority}`}>
+                              <div className={`ai-correction-number ${priority}`}>
+                                {idx + 1}
+                              </div>
+                              <div className="ai-correction-content">
+                                <div className={`ai-correction-category ${priority}`}>
+                                  {priority.toUpperCase()} - {category}
+                                </div>
+                                <div className="ai-correction-instruction">
+                                  {instruction}
+                                </div>
+                                {cue && (
+                                  <div className="ai-correction-cue">
+                                    {cue}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    
+                    <div className="ai-feedback-footer">
+                      <div className="ai-footer-actions">
+                        <button className="ai-footer-button" onClick={() => setShowAllTips(!showAllTips)}>
+                          <svg viewBox="0 0 16 16" fill="currentColor" style={{ transform: showAllTips ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                            <path d="M4.427 9.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 9H4.604a.25.25 0 00-.177.427z"/>
+                          </svg>
+                          {showAllTips ? 'Show less' : 'Show all tips'}
+                        </button>
+                        <button className="ai-footer-button" onClick={() => {
+                          navigator.clipboard.writeText(aiFeedback);
+                        }}>
+                          <svg viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/>
+                            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/>
+                          </svg>
+                          Copy coaching
+                        </button>
+                      </div>
+                      <button className="ai-footer-button" onClick={() => {
+                        setAiFeedback('');
+                        setAiFocus('Altitude');
+                        setAiError('');
+                        setShowAllTips(false);
+                        handleAiFeedbackRequest();
+                      }} disabled={aiLoading}>
+                        <svg viewBox="0 0 16 16" fill="currentColor">
+                          <path fillRule="evenodd" d="M8 2.5a5.487 5.487 0 00-4.131 1.869l1.204 1.204A.25.25 0 014.896 6H1.25A.25.25 0 011 5.75V2.104a.25.25 0 01.427-.177L2.627 3.27A6.991 6.991 0 018 1.5c3.866 0 7 3.134 7 7a6.991 6.991 0 01-1.77 4.627l1.204 1.204A.25.25 0 0114.896 14H11.25a.25.25 0 01-.25-.25v-3.646a.25.25 0 01.427-.177l1.204 1.204A5.487 5.487 0 008 12.5c-3.038 0-5.5-2.462-5.5-5.5S4.962 1.5 8 1.5z"/>
+                        </svg>
+                        Regenerate
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                {!aiFeedback && !aiError && !aiLoading && (
+                  <div className="ai-feedback-placeholder">
+                    Tap the button to fetch personalized coaching from the AI.
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           <div className="details-section">
             <h3>Entry Parameters</h3>
             <div className="details-grid">
@@ -209,31 +482,41 @@ function ManeuverCard({ maneuver, onDelete }) {
           <div className="details-section">
             <h3>Maximum Deviations</h3>
             <div className="deviation-grid">
-              <div className={Math.abs(details.deviations?.maxAltitude || 0) <= 100 ? 'pass' : 'fail'}>
-                <span className="label">Altitude:</span>
-                <span className="value">
-                  {(details.deviations?.maxAltitude >= 0 ? '+' : '') + 
-                   Math.round(details.deviations?.maxAltitude || 0)} ft
-                </span>
-              </div>
-              <div className={Math.abs(details.deviations?.maxAirspeed || 0) <= 10 ? 'pass' : 'fail'}>
-                <span className="label">Airspeed:</span>
-                <span className="value">
-                  {(details.deviations?.maxAirspeed >= 0 ? '+' : '') + 
-                   Math.round(details.deviations?.maxAirspeed || 0)} kt
-                </span>
-              </div>
-              <div className={Math.abs(details.deviations?.maxBank || 0) <= 5 ? 'pass' : 'fail'}>
-                <span className="label">Bank:</span>
-                <span className="value">
-                  {(details.deviations?.maxBank >= 0 ? '+' : '') + 
-                   Math.round(details.deviations?.maxBank || 0)}° from 45°
-                </span>
-              </div>
-              <div className={(details.deviations?.rolloutHeadingError || 0) <= 10 ? 'pass' : 'fail'}>
-                <span className="label">Rollout:</span>
-                <span className="value">{Math.round(details.deviations?.rolloutHeadingError || 0)}°</span>
-              </div>
+              {(() => {
+                const maneuverSkillLevel = skillLevel || details.autoStart?.skillLevel || SKILL_LEVELS.PRO
+                const tolerances = getSteepTurnPassTolerances(maneuverSkillLevel)
+                const maxBankTolerance = Math.max(tolerances.bank.max - 45, 45 - tolerances.bank.min)
+                
+                return (
+                  <>
+                    <div className={Math.abs(details.deviations?.maxAltitude || 0) <= tolerances.altitude ? 'pass' : 'fail'}>
+                      <span className="label">Altitude:</span>
+                      <span className="value">
+                        {(details.deviations?.maxAltitude >= 0 ? '+' : '') + 
+                         Math.round(details.deviations?.maxAltitude || 0)} ft
+                      </span>
+                    </div>
+                    <div className={Math.abs(details.deviations?.maxAirspeed || 0) <= tolerances.airspeed ? 'pass' : 'fail'}>
+                      <span className="label">Airspeed:</span>
+                      <span className="value">
+                        {(details.deviations?.maxAirspeed >= 0 ? '+' : '') + 
+                         Math.round(details.deviations?.maxAirspeed || 0)} kt
+                      </span>
+                    </div>
+                    <div className={Math.abs(details.deviations?.maxBank || 0) <= maxBankTolerance ? 'pass' : 'fail'}>
+                      <span className="label">Bank:</span>
+                      <span className="value">
+                        {(details.deviations?.maxBank >= 0 ? '+' : '') + 
+                         Math.round(details.deviations?.maxBank || 0)}° from 45°
+                      </span>
+                    </div>
+                    <div className={(details.deviations?.rolloutHeadingError || 0) <= tolerances.rolloutHeading ? 'pass' : 'fail'}>
+                      <span className="label">Rollout:</span>
+                      <span className="value">{Math.round(details.deviations?.rolloutHeadingError || 0)}°</span>
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           </div>
 

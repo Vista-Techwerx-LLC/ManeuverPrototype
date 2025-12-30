@@ -15,19 +15,29 @@ export default function FlightPath3D({ flightPath, entry }) {
   const planeRef = useRef(null)
   const raycasterRef = useRef(null)
   const mouseRef = useRef(new THREE.Vector2())
+  const progressBarRef = useRef(null)
+  const progressBarFillRef = useRef(null)
+  const pathDataRef = useRef([])
+  const animationDurationRef = useRef(10000)
+  const planeGroupRef = useRef(null)
   const [isPlaying, setIsPlaying] = useState(false)
   const [animationProgress, setAnimationProgress] = useState(0)
+  const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
   const [currentData, setCurrentData] = useState(null)
   const animationTimeRef = useRef(0)
   const pointSpheresRef = useRef([])
   const originAltRef = useRef(0)
   const isPlayingRef = useRef(false)
+  const playbackSpeedRef = useRef(1.0)
   const lastPausedIndexRef = useRef(-1)
 
-  // Keep isPlayingRef in sync with isPlaying state
   useEffect(() => {
     isPlayingRef.current = isPlaying
   }, [isPlaying])
+
+  useEffect(() => {
+    playbackSpeedRef.current = playbackSpeed
+  }, [playbackSpeed])
 
   useEffect(() => {
     if (!containerRef.current || !flightPath || flightPath.length === 0) {
@@ -157,6 +167,8 @@ export default function FlightPath3D({ flightPath, entry }) {
 
     if (pathPoints.length === 0) return
 
+    pathDataRef.current = pathData
+
     // Find entry point (where roll begins - bank starts increasing significantly)
     let entryIndex = -1
     const entryBankThreshold = 5
@@ -186,6 +198,7 @@ export default function FlightPath3D({ flightPath, entry }) {
     let maxBankIndex = 0
     let maxBank = 0
 
+    // Find max bank reached during the turn
     for (let i = 0; i < pathData.length; i++) {
       const b = Math.abs(pathData[i].bank || 0)
       if (b > maxBank) {
@@ -194,43 +207,102 @@ export default function FlightPath3D({ flightPath, entry }) {
       }
     }
 
-    // Find rollout start: when bank decreases to 20-25 degrees after reaching max bank
-    // Rollout typically begins about half the bank angle before target heading
-    // For a 45° bank, that's about 22-30° before, which corresponds to ~20-25° bank
-    const rolloutStartBankMin = 20
-    const rolloutStartBankMax = 25
+    // Calculate total turn to find when we've passed 325° (rollout trigger point)
+    let totalTurn = 0
+    let lastHdg = pathData[0]?.heading
+    let turnDirection = null
+    let passed325Degrees = -1
+
+    for (let i = 1; i < pathData.length; i++) {
+      const hdg = pathData[i].heading
+      const bank = pathData[i].bank || 0
+      
+      if (turnDirection === null && Math.abs(bank) > 20) {
+        turnDirection = bank > 0 ? 'right' : 'left'
+      }
+      
+      if (turnDirection && lastHdg != null) {
+        let delta = hdg - lastHdg
+        while (delta > 180) delta -= 360
+        while (delta < -180) delta += 360
+        
+        if (turnDirection === 'right' && delta > 0) {
+          totalTurn += delta
+        } else if (turnDirection === 'left' && delta < 0) {
+          totalTurn += Math.abs(delta)
+        }
+        
+        if (passed325Degrees === -1 && totalTurn >= 325) {
+          passed325Degrees = i
+        }
+      }
+      lastHdg = hdg
+    }
+
+    // Find rollout start: bank drops below 50% of target bank (45°) AND we've passed 325° of turn
+    const targetBank = 45
+    const rolloutTriggerBank = targetBank * 0.5
     
-    for (let i = maxBankIndex + 1; i < pathData.length; i++) {
+    const searchStart = passed325Degrees >= 0 ? passed325Degrees : maxBankIndex + 1
+    
+    // Detect rollout start using downward crossing (bank decreasing)
+    // Matches tracking logic exactly: totalTurn >= 325, prevBankAbs > rolloutTriggerBank, bankAbs < prevBankAbs
+    // Need to track totalTurn per point to match the 325° requirement
+    let pointTotalTurn = 0
+    let pointLastHdg = pathData[0]?.heading
+    
+    for (let i = searchStart + 1; i < pathData.length; i++) {
+      const prev = Math.abs(pathData[i - 1].bank || 0)
       const curr = Math.abs(pathData[i].bank || 0)
-      // Rollout starts when bank is in the 20-25 degree range
-      if (curr >= rolloutStartBankMin && curr <= rolloutStartBankMax) {
+      const hdg = pathData[i].heading
+      
+      // Calculate turn progress at this point
+      if (turnDirection && pointLastHdg != null && hdg != null) {
+        let delta = hdg - pointLastHdg
+        while (delta > 180) delta -= 360
+        while (delta < -180) delta += 360
+        
+        if (turnDirection === 'right' && delta > 0) {
+          pointTotalTurn += delta
+        } else if (turnDirection === 'left' && delta < 0) {
+          pointTotalTurn += Math.abs(delta)
+        }
+      }
+      pointLastHdg = hdg
+      
+      // Start rollout when: totalTurn >= 325, prevBank > trigger, currBank < prevBank (decreasing)
+      // Matches tracking: totalTurn >= 325, prevBankAbs > rolloutTriggerBank, bankAbs < prevBankAbs
+      if (pointTotalTurn >= 325 && prev > rolloutTriggerBank && curr < prev) {
         rolloutStartIndex = i
         break
       }
     }
     
-    // If no point found in exact range, find closest point to 22.5 degrees (middle of range)
-    if (rolloutStartIndex === -1) {
-      let closestIndex = -1
-      let closestDiff = Infinity
-      for (let i = maxBankIndex + 1; i < pathData.length; i++) {
+    // Fallback: if no match found after 325°, search from max bank index with same logic
+    if (rolloutStartIndex === -1 && passed325Degrees >= 0) {
+      pointTotalTurn = 325 // Start from 325 since we know we've passed it
+      pointLastHdg = pathData[passed325Degrees]?.heading
+      
+      for (let i = Math.max(passed325Degrees + 1, maxBankIndex + 2); i < pathData.length; i++) {
+        const prev = Math.abs(pathData[i - 1].bank || 0)
         const curr = Math.abs(pathData[i].bank || 0)
-        const diff = Math.abs(curr - 22.5)
-        if (diff < closestDiff && curr < maxBank * 0.7) {
-          closestDiff = diff
-          closestIndex = i
+        const hdg = pathData[i].heading
+        
+        if (turnDirection && pointLastHdg != null && hdg != null) {
+          let delta = hdg - pointLastHdg
+          while (delta > 180) delta -= 360
+          while (delta < -180) delta += 360
+          
+          if (turnDirection === 'right' && delta > 0) {
+            pointTotalTurn += delta
+          } else if (turnDirection === 'left' && delta < 0) {
+            pointTotalTurn += Math.abs(delta)
+          }
         }
-      }
-      if (closestIndex !== -1) {
-        rolloutStartIndex = closestIndex
-      }
-    }
-    
-    // Final fallback: use point where bank drops below 30 degrees
-    if (rolloutStartIndex === -1) {
-      for (let i = maxBankIndex + 1; i < pathData.length; i++) {
-        const curr = Math.abs(pathData[i].bank || 0)
-        if (curr <= 30) {
+        pointLastHdg = hdg
+        
+        // Matches tracking: totalTurn >= 325, prevBankAbs > rolloutTriggerBank, bankAbs < prevBankAbs
+        if (pointTotalTurn >= 325 && prev > rolloutTriggerBank && curr < prev) {
           rolloutStartIndex = i
           break
         }
@@ -240,10 +312,11 @@ export default function FlightPath3D({ flightPath, entry }) {
     // If still not found, use last point
     if (rolloutStartIndex === -1) rolloutStartIndex = pathData.length - 1
 
-    // Find rollout end: when bank reaches level (≤ 5 degrees)
+    // Find rollout end: when bank reaches wings level (≤ 5 degrees)
+    const WINGS_LEVEL_THRESHOLD = 5
     for (let i = rolloutStartIndex; i < pathData.length; i++) {
       const curr = Math.abs(pathData[i].bank || 0)
-      if (curr <= 5) {
+      if (curr <= WINGS_LEVEL_THRESHOLD) {
         rolloutEndIndex = i
         break
       }
@@ -427,17 +500,23 @@ export default function FlightPath3D({ flightPath, entry }) {
     }
 
     // Convert rollout indices to sampled indices
-    const sampledRolloutStartIndex = Math.floor(rolloutStartIndex / sampleRate)
-    const sampledRolloutEndIndex = Math.floor(rolloutEndIndex / sampleRate)
+    const sampledRolloutStartIndex = rolloutStartIndex >= 0 ? Math.floor(rolloutStartIndex / sampleRate) : -1
+    const sampledRolloutEndIndex = rolloutEndIndex >= 0 ? Math.floor(rolloutEndIndex / sampleRate) : -1
 
-    for (let i = 0; i < sampledData.length; i++) {
-      // Skip rollout portion - it will be shown as a separate magenta segment
-      if (i >= sampledRolloutStartIndex && i <= sampledRolloutEndIndex) {
-        continue
-      }
+    // Stop main path at rollout start (inclusive) - rollout segment will continue from there
+    const mainPathEndIndex = sampledRolloutStartIndex >= 0 ? sampledRolloutStartIndex + 1 : sampledData.length
+
+    for (let i = 0; i < mainPathEndIndex && i < sampledData.length; i++) {
 
       const altDev = sampledData[i].alt - originAlt
-      const category = getColorCategory(altDev)
+      let category = getColorCategory(altDev)
+      
+      // After rollout starts, don't show green - use warning or bad colors instead
+      if (sampledRolloutStartIndex >= 0 && i >= sampledRolloutStartIndex) {
+        if (category === 'good') {
+          category = 'warning'
+        }
+      }
 
       if (category !== currentCategory) {
         if (currentSegmentPoints.length > 0) {
@@ -499,6 +578,7 @@ export default function FlightPath3D({ flightPath, entry }) {
     }
 
     const planeGroup = new THREE.Group()
+    planeGroupRef.current = planeGroup
 
       const planeBodyGeometry = new THREE.BoxGeometry(40, 8, 120, 4, 2, 8)
       const planeBodyMaterial = new THREE.MeshStandardMaterial({
@@ -607,33 +687,50 @@ export default function FlightPath3D({ flightPath, entry }) {
     let rolloutGeometry = null
     let rolloutMaterial = null
 
-    if (rolloutStartIndex < rolloutEndIndex) {
-      for (let i = rolloutStartIndex; i <= rolloutEndIndex && i < pathPoints.length; i++) {
-        rolloutPoints.push(pathPoints[i])
+    // Build rollout segment using sampled points to match main path
+    // Start from the rollout start point (which is included in main path) to ensure connection
+    if (sampledRolloutStartIndex >= 0 && sampledRolloutEndIndex >= sampledRolloutStartIndex) {
+      // Include the rollout start point to connect with main path
+      for (let i = sampledRolloutStartIndex; i <= sampledRolloutEndIndex && i < sampledPoints.length; i++) {
+        rolloutPoints.push(sampledPoints[i])
+      }
+      // If we only got a single point, add the end point (if available) or duplicate with a tiny offset
+      if (rolloutPoints.length === 1) {
+        const endPoint = sampledPoints[Math.min(sampledRolloutEndIndex, sampledPoints.length - 1)]
+        if (endPoint && endPoint !== rolloutPoints[0]) {
+          rolloutPoints.push(endPoint)
+        } else {
+          rolloutPoints.push(rolloutPoints[0].clone().add(new THREE.Vector3(0.01, 0, 0)))
+        }
       }
     }
 
     if (rolloutPoints.length >= 2) {
       const rolloutCurve = new THREE.CatmullRomCurve3(rolloutPoints, false, 'centripetal')
-      rolloutGeometry = new THREE.TubeGeometry(rolloutCurve, Math.max(rolloutPoints.length * 2, 10), 14, 8, false)
+      rolloutGeometry = new THREE.TubeGeometry(rolloutCurve, Math.max(rolloutPoints.length * 2, 10), 18, 8, false)
       rolloutMaterial = new THREE.MeshStandardMaterial({
         color: 0xff00ff,
         emissive: 0xff00ff,
-        emissiveIntensity: 0.5,
-        metalness: 0.1,
-        roughness: 0.5,
-        transparent: true,
-        opacity: 0.8
+        emissiveIntensity: 1.5,
+        metalness: 0.0,
+        roughness: 0.2,
+        transparent: false,
+        opacity: 1.0,
+        depthWrite: true,
+        depthTest: true
       })
       const rolloutSegment = new THREE.Mesh(rolloutGeometry, rolloutMaterial)
       rolloutSegment.castShadow = true
+      rolloutSegment.receiveShadow = false
+      rolloutSegment.renderOrder = 1000
       scene.add(rolloutSegment)
     }
 
-    // Rollout start marker (where opposite roll begins)
-    const rolloutStartPoint = rolloutStartIndex >= 0 && rolloutStartIndex < pathPoints.length
-      ? pathPoints[rolloutStartIndex]
-      : pathPoints[pathPoints.length - 1]
+    // Rollout start marker (bank decreases below ½ target bank)
+    // Use sampled point to match main path and rollout segment
+    const rolloutStartPoint = sampledRolloutStartIndex >= 0 && sampledRolloutStartIndex < sampledPoints.length
+      ? sampledPoints[sampledRolloutStartIndex]
+      : (sampledPoints.length > 0 ? sampledPoints[sampledPoints.length - 1] : new THREE.Vector3(0, 0, 0))
     
     const rolloutStartGeometry = new THREE.SphereGeometry(32, 32, 32)
     const rolloutStartMaterial = new THREE.MeshStandardMaterial({ 
@@ -692,6 +789,7 @@ export default function FlightPath3D({ flightPath, entry }) {
     referencePlane.rotation.x = -Math.PI / 2
     referencePlane.position.set(center.x, 0, center.z)
     referencePlane.receiveShadow = true
+    referencePlane.renderOrder = -1
     scene.add(referencePlane)
 
     // Grid - brighter, centered on flight path
@@ -800,6 +898,7 @@ export default function FlightPath3D({ flightPath, entry }) {
     const firstTimestamp = pathData[0]?.timestamp || 0
     const lastTimestamp = pathData[pathData.length - 1]?.timestamp || 0
     const animationDuration = lastTimestamp > firstTimestamp ? (lastTimestamp - firstTimestamp) : 10000
+    animationDurationRef.current = animationDuration
     let cameraTarget = new THREE.Vector3()
     let cameraPosition = camera.position.clone()
     let frameCount = 0
@@ -822,9 +921,13 @@ export default function FlightPath3D({ flightPath, entry }) {
       
       if (isPlayingRef.current && pathData.length > 0) {
         lastPausedIndexRef.current = -1
-        animationTimeRef.current += deltaTime * 1000
+        animationTimeRef.current += deltaTime * 1000 * playbackSpeedRef.current
         const progress = Math.min(animationTimeRef.current / animationDuration, 1.0)
         setAnimationProgress(progress)
+        
+        if (progressBarFillRef.current) {
+          progressBarFillRef.current.style.width = `${progress * 100}%`
+        }
         
         if (progress >= 1.0) {
           setIsPlaying(false)
@@ -1051,6 +1154,11 @@ export default function FlightPath3D({ flightPath, entry }) {
     setIsPlaying(false)
     animationTimeRef.current = 0
     setAnimationProgress(0)
+    
+    if (progressBarFillRef.current) {
+      progressBarFillRef.current.style.width = '0%'
+    }
+    
     lastPausedIndexRef.current = -1
     if (flightPath && flightPath.length > 0) {
       const firstPoint = flightPath[0]
@@ -1064,6 +1172,66 @@ export default function FlightPath3D({ flightPath, entry }) {
         })
       }
     }
+  }
+
+  const seekToProgress = (progress) => {
+    const clampedProgress = Math.max(0, Math.min(1, progress))
+    setAnimationProgress(clampedProgress)
+    
+    if (progressBarFillRef.current) {
+      progressBarFillRef.current.style.width = `${clampedProgress * 100}%`
+    }
+    
+    const duration = animationDurationRef.current
+    animationTimeRef.current = clampedProgress * duration
+    
+    const pathData = pathDataRef.current
+    if (pathData.length > 0 && planeGroupRef.current) {
+      const exactIndex = clampedProgress * (pathData.length - 1)
+      const pathIndex = Math.floor(exactIndex)
+      const nextIndex = Math.min(pathIndex + 1, pathData.length - 1)
+      const t = exactIndex % 1
+      
+      const currentPathData = pathData[pathIndex]
+      const nextPathData = pathData[nextIndex]
+      
+      if (currentPathData && nextPathData) {
+        const position = currentPathData.position.clone().lerp(nextPathData.position, t)
+        planeGroupRef.current.position.copy(position)
+        
+        const bank = THREE.MathUtils.lerp(currentPathData.bank, nextPathData.bank, t)
+        const pitch = THREE.MathUtils.lerp(currentPathData.pitch, nextPathData.pitch, t)
+        const heading = THREE.MathUtils.lerp(currentPathData.heading, nextPathData.heading, t)
+        
+        const direction = nextPathData.position.clone().sub(currentPathData.position).normalize()
+        const lookAhead = position.clone().add(direction.clone().multiplyScalar(50))
+        
+        planeGroupRef.current.rotation.set(0, 0, 0)
+        planeGroupRef.current.lookAt(lookAhead)
+        planeGroupRef.current.rotateX(-pitch * Math.PI / 180)
+        planeGroupRef.current.rotateZ(bank * Math.PI / 180)
+        
+        setCurrentData({
+          alt: THREE.MathUtils.lerp(currentPathData.alt, nextPathData.alt, t),
+          bank: bank,
+          heading: heading,
+          airspeed: THREE.MathUtils.lerp(currentPathData.airspeed, nextPathData.airspeed, t),
+          pitch: pitch
+        })
+        
+        lastPausedIndexRef.current = pathIndex
+      }
+    }
+  }
+
+  const handleProgressBarClick = (e) => {
+    if (!progressBarRef.current) return
+    
+    const rect = progressBarRef.current.getBoundingClientRect()
+    const clickX = e.clientX - rect.left
+    const progress = clickX / rect.width
+    
+    seekToProgress(progress)
   }
 
   if (!flightPath || flightPath.length === 0) {
@@ -1095,8 +1263,29 @@ export default function FlightPath3D({ flightPath, entry }) {
           >
             ⏮
           </button>
-          <div className="flight-path-progress">
+          <div className="flight-path-speed-control">
+            <label className="flight-path-speed-label" title="Playback Speed">
+              ⚡
+            </label>
+            <input
+              type="range"
+              min="0.25"
+              max="4"
+              step="0.25"
+              value={playbackSpeed}
+              onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+              className="flight-path-speed-slider"
+              title={`${playbackSpeed}x speed`}
+            />
+            <span className="flight-path-speed-value">{playbackSpeed}x</span>
+          </div>
+          <div 
+            className="flight-path-progress"
+            ref={progressBarRef}
+            onClick={handleProgressBarClick}
+          >
             <div 
+              ref={progressBarFillRef}
               className="flight-path-progress-bar" 
               style={{ width: `${animationProgress * 100}%` }}
             />
@@ -1133,7 +1322,7 @@ export default function FlightPath3D({ flightPath, entry }) {
           </div>
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#ff00ff', borderRadius: '50%' }}></span>
-            <span>Rollout Start (Opposite Roll Begins)</span>
+            <span>Rollout Start (Bank decreases below ½ target bank)</span>
           </div>
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#888888', borderRadius: '50%' }}></span>

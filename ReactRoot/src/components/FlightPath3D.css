@@ -58,6 +58,71 @@
   transform: scale(1.05);
 }
 
+.flight-path-speed-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  padding: 0 12px;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.flight-path-speed-label {
+  font-size: 16px;
+  color: var(--text);
+  cursor: default;
+}
+
+.flight-path-speed-slider {
+  width: 80px;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.flight-path-speed-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: var(--blue);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.flight-path-speed-slider::-webkit-slider-thumb:hover {
+  background: #4a90e2;
+}
+
+.flight-path-speed-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: var(--blue);
+  border-radius: 50%;
+  cursor: pointer;
+  border: none;
+  transition: background 0.2s;
+}
+
+.flight-path-speed-slider::-moz-range-thumb:hover {
+  background: #4a90e2;
+}
+
+.flight-path-speed-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 35px;
+  text-align: center;
+  font-family: 'Consolas', monospace;
+}
+
 .flight-path-progress {
   flex: 1;
   height: 8px;
@@ -65,6 +130,8 @@
   border-radius: 4px;
   overflow: hidden;
   position: relative;
+  cursor: pointer;
+  margin-left: 8px;
 }
 
 .flight-path-live-data {

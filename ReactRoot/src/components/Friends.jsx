@@ -190,7 +190,7 @@ export default function Friends({ user }) {
         return
       }
 
-      alert('Invite sent! They will see it in their Friends page.')
+      alert('Invite sent! They will see it in their Instructor Portal.')
       setInviteEmail('')
       loadRelationships()
     } catch (error) {
@@ -236,7 +236,7 @@ export default function Friends({ user }) {
   }
 
   async function removeFriend(relationshipId) {
-    if (!confirm('Remove this friend/instructor?')) return
+    if (!confirm('Remove this connection?')) return
 
     try {
       const { error } = await supabase
@@ -245,13 +245,13 @@ export default function Friends({ user }) {
         .eq('id', relationshipId)
 
       if (error) {
-        console.error('Error removing friend:', error)
+        console.error('Error removing connection:', error)
         return
       }
 
       loadRelationships()
     } catch (error) {
-      console.error('Error removing friend:', error)
+      console.error('Error removing connection:', error)
     }
   }
 
@@ -268,11 +268,11 @@ export default function Friends({ user }) {
   return (
     <div className="friends-page">
       <div className="friends-container">
-        <h1>Connections</h1>
-        <p className="subtitle">Connect with friends to view each other's progress and logs</p>
+        <h1>Instructor Portal</h1>
+        <p className="subtitle">Connect with students and instructors to view each other's progress and logs</p>
 
         <div className="invite-section">
-          <h2>Connect with Friend</h2>
+          <h2>Connect with Student or Instructor</h2>
           <div className="invite-form">
             <input
               type="email"
@@ -318,22 +318,22 @@ export default function Friends({ user }) {
                 <p>No connections yet. Send an invite to get started!</p>
               </div>
             ) : (
-              friends.map(friend => (
-                <div key={friend.relationshipId} className="friend-card">
+              friends.map(connection => (
+                <div key={connection.relationshipId} className="friend-card">
                   <div className="friend-info">
-                    <div className="friend-email">{friend.otherUser?.email || 'Unknown'}</div>
-                    <div className="friend-role">Connected</div>
+                    <div className="friend-email">{connection.otherUser?.email || 'Unknown'}</div>
+                    <div className="friend-role">{connection.role === 'instructor' ? 'Instructor' : 'Student'}</div>
                   </div>
                   <div className="friend-actions">
                     <Link
-                      to={`/view-student/${friend.otherUser?.id || friend.otherUser?.user_id}`}
+                      to={`/view-student/${connection.otherUser?.id || connection.otherUser?.user_id}`}
                       className="view-btn"
                     >
                       View Progress
                     </Link>
                     <button
                       className="remove-btn"
-                      onClick={() => removeFriend(friend.relationshipId)}
+                      onClick={() => removeFriend(connection.relationshipId)}
                     >
                       Remove
                     </button>
@@ -355,7 +355,7 @@ export default function Friends({ user }) {
                 <div key={invite.relationshipId} className="friend-card">
                   <div className="friend-info">
                     <div className="friend-email">{invite.otherUser?.email || 'Unknown'}</div>
-                    <div className="friend-role">Wants to connect</div>
+                    <div className="friend-role">{invite.role === 'instructor' ? 'Instructor' : 'Student'} - Wants to connect</div>
                   </div>
                   <div className="friend-actions">
                     <button
@@ -388,7 +388,7 @@ export default function Friends({ user }) {
                 <div key={invite.relationshipId} className="friend-card">
                   <div className="friend-info">
                     <div className="friend-email">{invite.otherUser?.email || 'Unknown'}</div>
-                    <div className="friend-status">Pending...</div>
+                    <div className="friend-status">{invite.role === 'instructor' ? 'Instructor' : 'Student'} - Pending...</div>
                   </div>
                   <button
                     className="cancel-btn"

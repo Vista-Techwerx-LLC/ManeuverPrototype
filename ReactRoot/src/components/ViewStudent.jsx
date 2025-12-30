@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts'
+import { getSteepTurnPassTolerances, SKILL_LEVELS } from '../utils/autoStartTolerances'
+import FlightPath3D from './FlightPath3D'
 import './ViewStudent.css'
 
 export default function ViewStudent({ user }) {
@@ -156,7 +158,7 @@ export default function ViewStudent({ user }) {
             Make sure you're both connected and the connection has been accepted.
           </p>
           <button onClick={() => navigate('/friends')} className="back-btn">
-            Back to Connections
+            Back to Instructor Portal
           </button>
         </div>
       </div>
@@ -435,31 +437,41 @@ function ManeuverCard({ maneuver }) {
           <div className="details-section">
             <h3>Maximum Deviations</h3>
             <div className="deviation-grid">
-              <div className={Math.abs(details.deviations?.maxAltitude || 0) <= 100 ? 'pass' : 'fail'}>
-                <span className="label">Altitude:</span>
-                <span className="value">
-                  {(details.deviations?.maxAltitude >= 0 ? '+' : '') + 
-                   Math.round(details.deviations?.maxAltitude || 0)} ft
-                </span>
-              </div>
-              <div className={Math.abs(details.deviations?.maxAirspeed || 0) <= 10 ? 'pass' : 'fail'}>
-                <span className="label">Airspeed:</span>
-                <span className="value">
-                  {(details.deviations?.maxAirspeed >= 0 ? '+' : '') + 
-                   Math.round(details.deviations?.maxAirspeed || 0)} kt
-                </span>
-              </div>
-              <div className={Math.abs(details.deviations?.maxBank || 0) <= 5 ? 'pass' : 'fail'}>
-                <span className="label">Bank:</span>
-                <span className="value">
-                  {(details.deviations?.maxBank >= 0 ? '+' : '') + 
-                   Math.round(details.deviations?.maxBank || 0)}° from 45°
-                </span>
-              </div>
-              <div className={(details.deviations?.rolloutHeadingError || 0) <= 10 ? 'pass' : 'fail'}>
-                <span className="label">Rollout:</span>
-                <span className="value">{Math.round(details.deviations?.rolloutHeadingError || 0)}°</span>
-              </div>
+              {(() => {
+                const maneuverSkillLevel = skillLevel || details.autoStart?.skillLevel || SKILL_LEVELS.PRO
+                const tolerances = getSteepTurnPassTolerances(maneuverSkillLevel)
+                const maxBankTolerance = Math.max(tolerances.bank.max - 45, 45 - tolerances.bank.min)
+                
+                return (
+                  <>
+                    <div className={Math.abs(details.deviations?.maxAltitude || 0) <= tolerances.altitude ? 'pass' : 'fail'}>
+                      <span className="label">Altitude:</span>
+                      <span className="value">
+                        {(details.deviations?.maxAltitude >= 0 ? '+' : '') + 
+                         Math.round(details.deviations?.maxAltitude || 0)} ft
+                      </span>
+                    </div>
+                    <div className={Math.abs(details.deviations?.maxAirspeed || 0) <= tolerances.airspeed ? 'pass' : 'fail'}>
+                      <span className="label">Airspeed:</span>
+                      <span className="value">
+                        {(details.deviations?.maxAirspeed >= 0 ? '+' : '') + 
+                         Math.round(details.deviations?.maxAirspeed || 0)} kt
+                      </span>
+                    </div>
+                    <div className={Math.abs(details.deviations?.maxBank || 0) <= maxBankTolerance ? 'pass' : 'fail'}>
+                      <span className="label">Bank:</span>
+                      <span className="value">
+                        {(details.deviations?.maxBank >= 0 ? '+' : '') + 
+                         Math.round(details.deviations?.maxBank || 0)}° from 45°
+                      </span>
+                    </div>
+                    <div className={(details.deviations?.rolloutHeadingError || 0) <= tolerances.rolloutHeading ? 'pass' : 'fail'}>
+                      <span className="label">Rollout:</span>
+                      <span className="value">{Math.round(details.deviations?.rolloutHeadingError || 0)}°</span>
+                    </div>
+                  </>
+                )
+              })()}
             </div>
           </div>
 
@@ -492,6 +504,15 @@ function ManeuverCard({ maneuver }) {
                   </span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {details.flightPath && details.flightPath.length > 0 && (
+            <div className="details-section">
+              <FlightPath3D 
+                flightPath={details.flightPath} 
+                entry={details.entry}
+              />
             </div>
           )}
         </div>

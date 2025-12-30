@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useWebSocket } from '../hooks/useWebSocket'
 import { supabase } from '../lib/supabase'
+import { fetchSteepTurnFeedback } from '../lib/aiFeedback'
 import AutoStart from './AutoStart'
 import FlightPath3D from './FlightPath3D'
 import { SKILL_LEVELS, MANEUVER_TYPES, checkSteepTurnInRange, getSteepTurnEstablishmentThreshold, getSteepTurnPassTolerances } from '../utils/autoStartTolerances'
 import './SteepTurn.css'
+import { gradeSteepTurn, getGradeColorClass } from '../utils/steepTurnGrading'
 
 function normalizeAngle(angle) {
   let normalized = angle
@@ -21,13 +23,13 @@ async function saveManeuverToDatabase(userId, maneuverData) {
   
   if (saveInProgress.has(saveKey)) {
     console.log('⚠️ Save already in progress for this maneuver, skipping duplicate')
-    return false
+    return null
   }
   
   saveInProgress.add(saveKey)
   
   try {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('maneuver_results')
       .insert({
         user_id: userId,
@@ -36,20 +38,79 @@ async function saveManeuverToDatabase(userId, maneuverData) {
         result_data: maneuverData.details,
         skill_level: maneuverData.details.autoStart?.enabled ? maneuverData.details.autoStart.skillLevel : null
       })
+      .select('id')
+      .single()
     
     if (error) {
       console.error('Error saving maneuver:', error)
       saveInProgress.delete(saveKey)
-      return false
+      return null
     }
     
     console.log('✅ Maneuver saved to database')
     setTimeout(() => saveInProgress.delete(saveKey), 10000)
-    return true
+    return data?.id || null
   } catch (error) {
     console.error('Error saving maneuver:', error)
     saveInProgress.delete(saveKey)
+    return null
+  }
+}
+
+async function updateManeuverWithFeedback(maneuverId, feedback) {
+  if (!maneuverId) return false
+  
+  try {
+    const { data: existingData, error: fetchError } = await supabase
+      .from('maneuver_results')
+      .select('result_data')
+      .eq('id', maneuverId)
+      .single()
+    
+    if (fetchError || !existingData) {
+      console.error('Error fetching maneuver data:', fetchError)
+      return false
+    }
+    
+    const updatedResultData = {
+      ...existingData.result_data,
+      ai_feedback: feedback
+    }
+    
+    const { error } = await supabase
+      .from('maneuver_results')
+      .update({ result_data: updatedResultData })
+      .eq('id', maneuverId)
+    
+    if (error) {
+      console.error('Error updating maneuver with feedback:', error)
+      return false
+    }
+    
+    return true
+  } catch (error) {
+    console.error('Error updating maneuver with feedback:', error)
     return false
+  }
+}
+
+async function getManeuverFeedback(maneuverId) {
+  if (!maneuverId) return null
+  
+  try {
+    const { data, error } = await supabase
+      .from('maneuver_results')
+      .select('result_data')
+      .eq('id', maneuverId)
+      .single()
+    
+    if (error || !data) return null
+    
+    const resultData = data.result_data
+    return resultData?.ai_feedback || null
+  } catch (error) {
+    console.error('Error fetching maneuver feedback:', error)
+    return null
   }
 }
 
@@ -63,20 +124,23 @@ export default function SteepTurn({ user }) {
     turnDirection: null,
     totalTurn: 0,
     lastHdg: null,
+    lastBankAbs: null,
     maxAltDev: 0,
     maxSpdDev: 0,
     maxBankDev: 0,
+    maxBankReached: 0,
     busted: { alt: false, spd: false, bank: false },
-    // Track all values for averages
     samples: {
       bank: [],
       alt: [],
       spd: []
     },
-    // Track full flight path for 3D visualization
     flightPath: [],
-    // Track if turn is fully established (bank >= 40°) before checking violations
-    turnEstablished: false
+    turnEstablished: false,
+    rolloutStarted: false,
+    rolloutCompleted: false,
+    rolloutStartHdg: null,
+    rolloutEndHdg: null
   })
   const [pendingStart, setPendingStart] = useState(false)
   const [autoStartEnabled, setAutoStartEnabled] = useState(false)
@@ -90,6 +154,13 @@ export default function SteepTurn({ user }) {
   const progressCircleRef = useRef(null)
   const hasBeenSaved = useRef(false)
   const levelAfterEstablishmentTime = useRef(null)
+  const [aiFeedback, setAiFeedback] = useState('')
+  const [aiFocus, setAiFocus] = useState('Altitude')
+  const [aiError, setAiError] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
+  const [lastManeuverData, setLastManeuverData] = useState(null)
+  const [currentManeuverId, setCurrentManeuverId] = useState(null)
+  const [showAllTips, setShowAllTips] = useState(false)
 
   // Update state based on connection
   useEffect(() => {
@@ -103,16 +174,21 @@ export default function SteepTurn({ user }) {
   // Auto-start monitoring
   useEffect(() => {
     if (!autoStartEnabled || !data || !connected) {
-      if (state === 'tracking' && autoStartPhase.current !== 'idle') {
+      // Only cancel if auto-start was the one that started tracking
+      // Don't cancel manual tracking (when autoStartPhase is 'idle')
+      if (state === 'tracking' && autoStartPhase.current !== 'idle' && autoStartPhase.current !== 'waiting_for_level') {
         cancelTracking()
       }
-      autoStartPhase.current = 'waiting_for_level'
-      levelDetectedTime.current = null
-      baselineData.current = null
-      hasReachedSignificantBank.current = false
-      hasReached25Degrees.current = false
-      levelAfterEstablishmentTime.current = null
-      setAutoStartStatus(null)
+      // Only reset auto-start state if it's not manual tracking
+      if (!autoStartEnabled && autoStartPhase.current !== 'idle') {
+        autoStartPhase.current = 'waiting_for_level'
+        levelDetectedTime.current = null
+        baselineData.current = null
+        hasReachedSignificantBank.current = false
+        hasReached25Degrees.current = false
+        levelAfterEstablishmentTime.current = null
+        setAutoStartStatus(null)
+      }
       return
     }
 
@@ -210,9 +286,11 @@ export default function SteepTurn({ user }) {
             turnDirection: null,
             totalTurn: 0,
             lastHdg: newEntry.hdg,
+            lastBankAbs: null,
             maxAltDev: 0,
             maxSpdDev: 0,
             maxBankDev: 0,
+            maxBankReached: 0,
             busted: { alt: false, spd: false, bank: false },
             samples: {
               bank: [],
@@ -221,7 +299,11 @@ export default function SteepTurn({ user }) {
             },
             flightPath: [],
             baselineData: baselineData.current,
-            turnEstablished: false
+            turnEstablished: false,
+            rolloutStarted: false,
+            rolloutCompleted: false,
+            rolloutStartHdg: null,
+            rolloutEndHdg: null
           })
           setState('tracking')
           autoStartPhase.current = 'tracking'
@@ -241,31 +323,42 @@ export default function SteepTurn({ user }) {
   useEffect(() => {
     if (data && state === 'ready' && pendingStart) {
       setPendingStart(false)
-      const newEntry = {
-        hdg: data.hdg_true,
-        alt: data.alt_ft,
-        spd: data.ias_kt
-      }
+        const newEntry = {
+          hdg: data.hdg_true,
+          alt: data.alt_ft,
+          spd: data.ias_kt
+        }
       setEntry(newEntry)
       setTracking({
         turnDirection: null,
         totalTurn: 0,
         lastHdg: newEntry.hdg,
+        lastBankAbs: null,
         maxAltDev: 0,
         maxSpdDev: 0,
         maxBankDev: 0,
+        maxBankReached: 0,
         busted: { alt: false, spd: false, bank: false },
         samples: {
           bank: [],
           alt: [],
           spd: []
         },
-        turnEstablished: false
+        turnEstablished: false,
+        rolloutStarted: false,
+        rolloutCompleted: false,
+        rolloutStartHdg: null,
+        rolloutEndHdg: null
       })
       setState('tracking')
       autoStartPhase.current = 'idle'
       setAutoStartStatus(null)
       hasBeenSaved.current = false
+      setAiFeedback('')
+      setAiFocus('Altitude')
+      setAiError('')
+      setAiLoading(false)
+      setLastManeuverData(null)
     }
   }, [data, state, pendingStart])
 
@@ -291,6 +384,7 @@ export default function SteepTurn({ user }) {
     }
 
     // Cancel tracking if bank drops below 20 degrees after reaching 25 degrees, but before establishment (only for auto-start tracking)
+    // Don't cancel manual tracking (when autoStartPhase is 'idle')
     if (autoStartPhase.current === 'tracking' && !tracking.turnEstablished && hasReached25Degrees.current && bankAbs < 20) {
       setTimeout(() => {
         cancelTracking()
@@ -306,6 +400,7 @@ export default function SteepTurn({ user }) {
     }
 
     // Cancel tracking if bank goes back to level before turn is established (only for auto-start tracking)
+    // Don't cancel manual tracking (when autoStartPhase is 'idle')
     if (autoStartPhase.current === 'tracking' && !tracking.turnEstablished && bankAbs <= 3) {
       setTimeout(() => {
         cancelTracking()
@@ -321,6 +416,7 @@ export default function SteepTurn({ user }) {
     }
 
     // After turn is established, cancel only if bank is between -5 to 5 degrees for 3 seconds (only for auto-start tracking)
+    // Don't cancel manual tracking (when autoStartPhase is 'idle')
     if (autoStartPhase.current === 'tracking' && tracking.turnEstablished) {
       if (bankAbs <= 5) {
         // Bank is level (between -5 to 5 degrees) - start or continue timer
@@ -364,8 +460,13 @@ export default function SteepTurn({ user }) {
         newTracking.turnDirection = bank > 0 ? 'right' : 'left'
       }
 
-      // Calculate turn progress
-      if (state === 'tracking' && newTracking.turnDirection && newTracking.lastHdg != null && newTracking.totalTurn < 360) {
+      // Track max bank reached during the turn
+      if (bankAbs > newTracking.maxBankReached) {
+        newTracking.maxBankReached = bankAbs
+      }
+
+      // Calculate turn progress (continue tracking even past 360)
+      if ((state === 'tracking' || state === 'rollout') && newTracking.turnDirection && newTracking.lastHdg != null && !newTracking.rolloutCompleted) {
         let delta = hdg - newTracking.lastHdg
         delta = normalizeAngle(delta)
 
@@ -374,17 +475,39 @@ export default function SteepTurn({ user }) {
         } else if (newTracking.turnDirection === 'left' && delta < 0) {
           newTracking.totalTurn += Math.abs(delta)
         }
-
-        if (newTracking.totalTurn >= 360) {
-          newTracking.totalTurn = 360
-          if (rolloutStartTimeRef.current === null) {
-            rolloutStartTimeRef.current = now
-            rolloutLevelStartRef.current = null
-            setTimeout(() => setState('rollout'), 0)
-          }
-        }
       }
       newTracking.lastHdg = hdg
+
+      const prevBankAbs = newTracking.lastBankAbs ?? bankAbs
+      const targetBank = 45
+      const rolloutTriggerBank = targetBank * 0.5
+      if (
+        !newTracking.rolloutStarted &&
+        newTracking.totalTurn >= 325 &&
+        prevBankAbs > rolloutTriggerBank &&
+        bankAbs < prevBankAbs
+      ) {
+        newTracking.rolloutStarted = true
+        newTracking.rolloutStartHdg = hdg
+        if (rolloutStartTimeRef.current === null) {
+          rolloutStartTimeRef.current = now
+          rolloutLevelStartRef.current = null
+          setTimeout(() => setState('rollout'), 0)
+        }
+      }
+
+      // Detect rollout completion: wings level (bank ≤ 5°)
+      const WINGS_LEVEL_THRESHOLD = 5
+      if (
+        newTracking.rolloutStarted &&
+        !newTracking.rolloutCompleted &&
+        bankAbs <= WINGS_LEVEL_THRESHOLD
+      ) {
+        newTracking.rolloutCompleted = true
+        newTracking.rolloutEndHdg = hdg
+      }
+      
+      newTracking.lastBankAbs = bankAbs
 
       // Calculate deviations
       const altDev = alt - entry.alt
@@ -423,67 +546,77 @@ export default function SteepTurn({ user }) {
       if (Math.abs(altDev) > Math.abs(newTracking.maxAltDev)) newTracking.maxAltDev = altDev
       if (Math.abs(spdDev) > Math.abs(newTracking.maxSpdDev)) newTracking.maxSpdDev = spdDev
       
-      // Only track max bank deviation after turn is established
-      if (newTracking.turnEstablished) {
+      // Only track max bank deviation after turn is established and during tracking (not during rollout)
+      // Stop tracking bank deviation after 330° to avoid penalizing during rollout when bank decreases
+      // During rollout, bank should be decreasing to 0°, so we don't track deviations from 45°
+      if (newTracking.turnEstablished && state === 'tracking' && newTracking.totalTurn < 330) {
         if (Math.abs(bankDev) > Math.abs(newTracking.maxBankDev)) newTracking.maxBankDev = bankDev
       }
 
       // Only check for skill-level violations after turn is fully established
-      if (newTracking.turnEstablished) {
+      // During rollout, we don't check bank violations since bank should be decreasing to level
+      if (newTracking.turnEstablished && state === 'tracking') {
         if (Math.abs(altDev) > passTolerances.altitude) newTracking.busted.alt = true
         if (Math.abs(spdDev) > passTolerances.airspeed) newTracking.busted.spd = true
         if (bankAbs < passTolerances.bank.min || bankAbs > passTolerances.bank.max) newTracking.busted.bank = true
       }
+      
+      // During rollout, only check altitude and airspeed (not bank)
+      if (state === 'rollout' && newTracking.turnEstablished) {
+        if (Math.abs(altDev) > passTolerances.altitude) newTracking.busted.alt = true
+        if (Math.abs(spdDev) > passTolerances.airspeed) newTracking.busted.spd = true
+      }
 
-      if (state === 'rollout' && rolloutStartTimeRef.current != null) {
-        if (bankAbs <= 5) {
-          if (rolloutLevelStartRef.current == null) rolloutLevelStartRef.current = now
-        } else {
-          rolloutLevelStartRef.current = null
-        }
+      // Complete maneuver when rollout is completed (wings level)
+      if (newTracking.rolloutCompleted && state === 'rollout') {
+        const hdgErr = Math.abs(normalizeAngle(newTracking.rolloutEndHdg - entry.hdg))
+        const hdgPass = hdgErr <= passTolerances.rolloutHeading
+        const allPass = !newTracking.busted.alt && !newTracking.busted.spd && !newTracking.busted.bank && hdgPass
 
-        const elapsed = now - rolloutStartTimeRef.current
-        const levelElapsed = rolloutLevelStartRef.current ? now - rolloutLevelStartRef.current : 0
+        const avgBank = newTracking.samples.bank.length > 0
+          ? newTracking.samples.bank.reduce((a, b) => a + b, 0) / newTracking.samples.bank.length
+          : 0
+        const avgAlt = newTracking.samples.alt.length > 0
+          ? newTracking.samples.alt.reduce((a, b) => a + b, 0) / newTracking.samples.alt.length
+          : 0
+        const avgSpd = newTracking.samples.spd.length > 0
+          ? newTracking.samples.spd.reduce((a, b) => a + b, 0) / newTracking.samples.spd.length
+          : 0
 
-        if (elapsed >= 6000 || levelElapsed >= 1200) {
-          const hdgErr = Math.abs(normalizeAngle(hdg - entry.hdg))
-          const hdgPass = hdgErr <= passTolerances.rolloutHeading
-          const allPass = !newTracking.busted.alt && !newTracking.busted.spd && !newTracking.busted.bank && hdgPass
+        const gradeResult = gradeSteepTurn({
+          avgBank,
+          maxBankDev: newTracking.maxBankDev,
+          maxAltDev: newTracking.maxAltDev,
+          maxSpdDev: newTracking.maxSpdDev,
+          busted: newTracking.busted,
+          skillLevel: autoStartSkillLevel
+        })
 
-          const avgBank = newTracking.samples.bank.length > 0
-            ? newTracking.samples.bank.reduce((a, b) => a + b, 0) / newTracking.samples.bank.length
-            : 0
-          const avgAlt = newTracking.samples.alt.length > 0
-            ? newTracking.samples.alt.reduce((a, b) => a + b, 0) / newTracking.samples.alt.length
-            : 0
-          const avgSpd = newTracking.samples.spd.length > 0
-            ? newTracking.samples.spd.reduce((a, b) => a + b, 0) / newTracking.samples.spd.length
-            : 0
-
-          const gradeData = { 
-            allPass, 
-            hdgErr, 
-            hdgPass,
-            averages: {
-              bank: avgBank,
-              alt: avgAlt,
-              spd: avgSpd,
-              altDev: avgAlt - entry.alt,
-              spdDev: avgSpd - entry.spd
-            }
+        const gradeData = {
+          ...gradeResult,
+          allPass,
+          hdgErr,
+          hdgPass,
+          totalTurn: newTracking.totalTurn,
+          averages: {
+            bank: avgBank,
+            alt: avgAlt,
+            spd: avgSpd,
+            altDev: avgAlt - entry.alt,
+            spdDev: avgSpd - entry.spd
           }
-
-          setTimeout(() => {
-            setState('complete')
-            setTracking(prev2 => ({ ...prev2, grade: gradeData }))
-            if (!hasBeenSaved.current) {
-              hasBeenSaved.current = true
-              saveManeuver(allPass, hdgErr, newTracking, avgBank, avgAlt, avgSpd)
-            }
-            rolloutStartTimeRef.current = null
-            rolloutLevelStartRef.current = null
-          }, 0)
         }
+
+        setTimeout(async () => {
+          setState('complete')
+          setTracking(prev2 => ({ ...prev2, grade: gradeData }))
+          if (!hasBeenSaved.current) {
+            hasBeenSaved.current = true
+            await saveManeuver(newTracking, gradeData)
+          }
+          rolloutStartTimeRef.current = null
+          rolloutLevelStartRef.current = null
+        }, 0)
       }
 
       return newTracking
@@ -495,20 +628,32 @@ export default function SteepTurn({ user }) {
     setState('ready')
     rolloutStartTimeRef.current = null
     rolloutLevelStartRef.current = null
+    setAiFeedback('')
+    setAiFocus('Altitude')
+    setAiError('')
+    setAiLoading(false)
+    setLastManeuverData(null)
+    setCurrentManeuverId(null)
     setTracking({
       turnDirection: null,
       totalTurn: 0,
       lastHdg: null,
+      lastBankAbs: null,
       maxAltDev: 0,
       maxSpdDev: 0,
       maxBankDev: 0,
+      maxBankReached: 0,
       busted: { alt: false, spd: false, bank: false },
       samples: {
         bank: [],
         alt: [],
         spd: []
       },
-      turnEstablished: false
+      turnEstablished: false,
+      rolloutStarted: false,
+      rolloutCompleted: false,
+      rolloutStartHdg: null,
+      rolloutEndHdg: null
     })
     if (autoStartEnabled) {
       autoStartPhase.current = 'waiting_for_level'
@@ -527,20 +672,32 @@ export default function SteepTurn({ user }) {
     setState('ready')
     rolloutStartTimeRef.current = null
     rolloutLevelStartRef.current = null
+    setAiFeedback('')
+    setAiFocus('Altitude')
+    setAiError('')
+    setAiLoading(false)
+    setLastManeuverData(null)
+    setCurrentManeuverId(null)
     setTracking({
       turnDirection: null,
       totalTurn: 0,
       lastHdg: null,
+      lastBankAbs: null,
       maxAltDev: 0,
       maxSpdDev: 0,
       maxBankDev: 0,
+      maxBankReached: 0,
       busted: { alt: false, spd: false, bank: false },
       samples: {
         bank: [],
         alt: [],
         spd: []
       },
-      turnEstablished: false
+      turnEstablished: false,
+      rolloutStarted: false,
+      rolloutCompleted: false,
+      rolloutStartHdg: null,
+      rolloutEndHdg: null
     })
     if (autoStartEnabled) {
       autoStartPhase.current = 'waiting_for_level'
@@ -556,9 +713,9 @@ export default function SteepTurn({ user }) {
     hasBeenSaved.current = false
   }
 
-  function saveManeuver(allPass, hdgErr, finalTracking, avgBank, avgAlt, avgSpd) {
+  async function saveManeuver(finalTracking, gradeData) {
     const maneuverData = {
-      grade: allPass ? 'PASS' : 'FAIL',
+      grade: gradeData?.finalGrade || 'F',
       details: {
         entry: {
           heading: entry.hdg,
@@ -571,14 +728,10 @@ export default function SteepTurn({ user }) {
           maxAltitude: finalTracking.maxAltDev,
           maxAirspeed: finalTracking.maxSpdDev,
           maxBank: finalTracking.maxBankDev,
-          rolloutHeadingError: hdgErr
+          rolloutHeadingError: gradeData?.hdgErr ?? 0
         },
         averages: {
-          bank: avgBank,
-          altitude: avgAlt,
-          airspeed: avgSpd,
-          altitudeDeviation: avgAlt - entry.alt,
-          airspeedDeviation: avgSpd - entry.spd
+          ...gradeData?.averages
         },
         busted: finalTracking.busted,
         turnDirection: finalTracking.turnDirection,
@@ -588,17 +741,153 @@ export default function SteepTurn({ user }) {
           enabled: autoStartEnabled,
           skillLevel: autoStartSkillLevel
         },
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        gradeDetails: gradeData || null
       }
     }
     
-    saveManeuverToDatabase(user.id, maneuverData)
+    setLastManeuverData(maneuverData)
+    const maneuverId = await saveManeuverToDatabase(user.id, maneuverData)
+    if (maneuverId) {
+      setCurrentManeuverId(maneuverId)
+      const existingFeedback = await getManeuverFeedback(maneuverId)
+      if (existingFeedback) {
+        setAiFeedback(existingFeedback)
+      }
+    }
+  }
+
+  function getManeuverDataForFeedback() {
+    if (lastManeuverData) return lastManeuverData
+    if (!entry || !tracking.grade) return null
+
+    const gradeDetails = tracking.grade
+    return {
+      grade: gradeDetails?.finalGrade || 'F',
+      gradeDetails,
+      details: {
+        entry: {
+          heading: entry.hdg,
+          altitude: entry.alt,
+          airspeed: entry.spd,
+          lat: entry.lat,
+          lon: entry.lon
+        },
+        deviations: {
+          maxAltitude: tracking.maxAltDev,
+          maxAirspeed: tracking.maxSpdDev,
+          maxBank: tracking.maxBankDev,
+          rolloutHeadingError: tracking.grade?.hdgErr
+        },
+        averages: tracking.grade?.averages || null,
+        busted: tracking.busted,
+        turnDirection: tracking.turnDirection,
+        totalTurn: tracking.totalTurn,
+        flightPath: tracking.flightPath || [],
+        autoStart: {
+          enabled: autoStartEnabled,
+          skillLevel: autoStartSkillLevel
+        },
+        timestamp: new Date().toISOString()
+      }
+    }
+  }
+
+  async function handleAiFeedbackRequest() {
+    if (aiFeedback) {
+      return
+    }
+
+    const payload = getManeuverDataForFeedback()
+    if (!payload) {
+      setAiError('Maneuver data unavailable. Complete a steep turn first.')
+      return
+    }
+
+    setAiLoading(true)
+    setAiError('')
+
+    try {
+      const result = await fetchSteepTurnFeedback({
+        maneuver: payload,
+        maneuverType: 'steep_turn',
+        user: {
+          id: user.id,
+          email: user.email
+        }
+      })
+      
+      if (typeof result === 'object' && result.focus && result.feedback) {
+        setAiFocus(result.focus)
+        setAiFeedback(result.feedback)
+        const feedbackToSave = `FOCUS: ${result.focus}\n\n${result.feedback}`
+        if (currentManeuverId) {
+          await updateManeuverWithFeedback(currentManeuverId, feedbackToSave)
+        }
+      } else {
+        const feedbackText = typeof result === 'string' ? result : JSON.stringify(result)
+        const focusMatch = feedbackText.match(/^FOCUS:\s*(.+?)(?:\n|$)/i)
+        if (focusMatch) {
+          setAiFocus(focusMatch[1].trim())
+          setAiFeedback(feedbackText.replace(/^FOCUS:\s*.+?\n/i, '').trim())
+        } else {
+          setAiFocus('Altitude')
+          setAiFeedback(feedbackText)
+        }
+        if (currentManeuverId) {
+          await updateManeuverWithFeedback(currentManeuverId, feedbackText)
+        }
+      }
+    } catch (error) {
+      setAiError(error.message || 'Unable to get AI feedback')
+    } finally {
+      setAiLoading(false)
+    }
   }
 
   function handleStartClick() {
     if (state === 'ready') {
-      setPendingStart(true)
-    } else if (state === 'tracking') {
+      if (data && data.hdg_true != null && data.alt_ft != null && data.ias_kt != null) {
+        const newEntry = {
+          hdg: data.hdg_true,
+          alt: data.alt_ft,
+          spd: data.ias_kt
+        }
+        setEntry(newEntry)
+        setTracking({
+          turnDirection: null,
+          totalTurn: 0,
+          lastHdg: newEntry.hdg,
+          lastBankAbs: null,
+          maxAltDev: 0,
+          maxSpdDev: 0,
+          maxBankDev: 0,
+          maxBankReached: 0,
+          busted: { alt: false, spd: false, bank: false },
+          samples: {
+            bank: [],
+            alt: [],
+            spd: []
+          },
+          turnEstablished: false,
+          rolloutStarted: false,
+          rolloutCompleted: false,
+          rolloutStartHdg: null,
+          rolloutEndHdg: null
+        })
+        setState('tracking')
+        autoStartPhase.current = 'idle'
+        setAutoStartStatus(null)
+        hasBeenSaved.current = false
+        setAiFeedback('')
+        setAiFocus('Altitude')
+        setAiError('')
+        setAiLoading(false)
+        setLastManeuverData(null)
+      } else {
+        setPendingStart(true)
+      }
+    } else if (state === 'tracking' || state === 'rollout') {
       cancelTracking()
     }
   }
@@ -606,6 +895,11 @@ export default function SteepTurn({ user }) {
   const progress = Math.min(tracking.totalTurn / 360, 1)
   const circumference = 263.89
   const progressOffset = circumference * (1 - progress)
+  
+  // Calculate rollout heading error for display during rollout
+  const rolloutHeadingError = state === 'rollout' && entry && data?.hdg_true != null
+    ? Math.abs(normalizeAngle(data.hdg_true - entry.hdg))
+    : null
 
   const passTolerances = getSteepTurnPassTolerances(autoStartSkillLevel)
   
@@ -623,6 +917,8 @@ export default function SteepTurn({ user }) {
   const bankPct = Math.min(Math.abs(bankDev) / 5, 1) * 50
 
   const grade = tracking.grade
+  const finalGrade = grade?.finalGrade
+  const breakdown = grade?.breakdown || {}
   const allPass = grade?.allPass ?? false
   const summary = grade ? (
     allPass
@@ -659,11 +955,12 @@ export default function SteepTurn({ user }) {
               <div className={`status-badge ${state}`}>
                 ● {state === 'disconnected' ? 'Disconnected' : 
                    state === 'ready' ? 'Ready' : 
-                   (state === 'tracking' || state === 'rollout') ? 'Tracking Turn' : 'Complete'}
+                   state === 'tracking' ? 'Tracking Turn' :
+                   state === 'rollout' ? 'Tracking Rollout' : 'Complete'}
               </div>
 
               <button
-                className={`big-button ${state === 'tracking' ? 'stop' : 'start'}`}
+                className={`big-button ${(state === 'tracking' || state === 'rollout') ? 'stop' : 'start'}`}
                 disabled={state === 'disconnected' || state === 'complete'}
                 onClick={handleStartClick}
               >
@@ -746,24 +1043,52 @@ export default function SteepTurn({ user }) {
           <div className="right-col">
             {(state === 'tracking' || state === 'rollout') && (
               <div className="card">
-                <h2>Turn Progress</h2>
+                <h2>{state === 'rollout' ? 'Rollout' : 'Turn Progress'}</h2>
 
                 <div className="heading-ring">
                   <svg viewBox="0 0 100 100">
                     <circle className="bg-circle" cx="50" cy="50" r="42" />
-                    <circle
-                      ref={progressCircleRef}
-                      className="progress-circle"
-                      cx="50"
-                      cy="50"
-                      r="42"
-                      strokeDasharray="263.89"
-                      style={{ strokeDashoffset: progressOffset }}
-                    />
+                    {state === 'rollout' ? (
+                      <circle
+                        ref={progressCircleRef}
+                        className="progress-circle"
+                        cx="50"
+                        cy="50"
+                        r="42"
+                        strokeDasharray="263.89"
+                        style={{ 
+                          strokeDashoffset: rolloutHeadingError != null 
+                            ? circumference * (1 - Math.min(rolloutHeadingError / passTolerances.rolloutHeading, 1))
+                            : circumference
+                        }}
+                      />
+                    ) : (
+                      <circle
+                        ref={progressCircleRef}
+                        className="progress-circle"
+                        cx="50"
+                        cy="50"
+                        r="42"
+                        strokeDasharray="263.89"
+                        style={{ strokeDashoffset: progressOffset }}
+                      />
+                    )}
                   </svg>
                   <div className="center-text">
-                    <div className="degrees">{Math.round(tracking.totalTurn)}°</div>
-                    <div className="label">of 360°</div>
+                    {state === 'rollout' ? (
+                      <>
+                        <div className="degrees">{rolloutHeadingError != null ? Math.round(rolloutHeadingError) : '---'}°</div>
+                        <div className="label">Heading Error</div>
+                        <div className="label" style={{ fontSize: '12px', marginTop: '4px', opacity: 0.7 }}>
+                          Target: ±{passTolerances.rolloutHeading}°
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="degrees">{Math.round(tracking.totalTurn)}°</div>
+                        <div className="label">of 360°</div>
+                      </>
+                    )}
                   </div>
                 </div>
 
@@ -817,40 +1142,201 @@ export default function SteepTurn({ user }) {
                   </div>
                 </div>
 
-                <div className="tolerance-item">
-                  <div className="tolerance-header">
-                    <span className="tolerance-name">Bank Angle ({passTolerances.bank.min}°-{passTolerances.bank.max}°)</span>
-                    <span className={`tolerance-value ${bankInTolerance ? 'pass' : 'fail'}`}>
-                      {Math.round(bankAbs)}°
-                    </span>
+                {state === 'tracking' && (
+                  <div className="tolerance-item">
+                    <div className="tolerance-header">
+                      <span className="tolerance-name">Bank Angle ({passTolerances.bank.min}°-{passTolerances.bank.max}°)</span>
+                      <span className={`tolerance-value ${bankInTolerance ? 'pass' : 'fail'}`}>
+                        {Math.round(bankAbs)}°
+                      </span>
+                    </div>
+                    <div className="tolerance-bar">
+                      <div
+                        className="fill"
+                        style={{
+                          left: bankDev >= 0 ? '50%' : `${50 - bankPct}%`,
+                          width: `${bankPct}%`,
+                          background: bankInTolerance ? 'var(--green)' : 'var(--red)'
+                        }}
+                      />
+                      <div className="center-line" />
+                    </div>
+                    <div className="tolerance-limits">
+                      <span>{passTolerances.bank.min}°</span>
+                      <span>45°</span>
+                      <span>{passTolerances.bank.max}°</span>
+                    </div>
                   </div>
-                  <div className="tolerance-bar">
-                    <div
-                      className="fill"
-                      style={{
-                        left: bankDev >= 0 ? '50%' : `${50 - bankPct}%`,
-                        width: `${bankPct}%`,
-                        background: bankInTolerance ? 'var(--green)' : 'var(--red)'
-                      }}
-                    />
-                    <div className="center-line" />
+                )}
+                {state === 'rollout' && (
+                  <div className="tolerance-item">
+                    <div className="tolerance-header">
+                      <span className="tolerance-name">Bank Angle (Rolling Out)</span>
+                      <span className="tolerance-value">
+                        {Math.round(bankAbs)}°
+                      </span>
+                    </div>
+                    <div className="tolerance-bar">
+                      <div
+                        className="fill"
+                        style={{
+                          left: '50%',
+                          width: `${Math.min((bankAbs / 45) * 50, 50)}%`,
+                          background: bankAbs <= 5 ? 'var(--green)' : 'var(--yellow)'
+                        }}
+                      />
+                      <div className="center-line" />
+                    </div>
+                    <div className="tolerance-limits">
+                      <span>0°</span>
+                      <span>Level</span>
+                      <span>45°</span>
+                    </div>
+                    <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-muted)', textAlign: 'center' }}>
+                      {bankAbs <= 5 ? '✓ Wings Level' : 'Rolling out...'}
+                    </div>
                   </div>
-                  <div className="tolerance-limits">
-                    <span>{passTolerances.bank.min}°</span>
-                    <span>45°</span>
-                    <span>{passTolerances.bank.max}°</span>
-                  </div>
-                </div>
+                )}
               </div>
             )}
 
             {state === 'complete' && (
-              <div className="card grade-card">
-                <h2>Maneuver Complete</h2>
-                <div className={`grade ${allPass ? 'pass' : 'fail'}`}>
-                  {allPass ? 'PASS' : 'FAIL'}
+        <div className="card grade-card">
+          <h2>Maneuver Complete</h2>
+          <div className={`grade ${getGradeColorClass(finalGrade)}`}>
+            {finalGrade || '—'}
+          </div>
+          <div className="grade-breakdown">
+            <span className={`grade-chip ${getGradeColorClass(breakdown.bank)} ${breakdown.bank === finalGrade ? 'worst' : ''}`}>
+              Bank: {breakdown.bank || '—'}
+            </span>
+            <span className={`grade-chip ${getGradeColorClass(breakdown.alt)} ${breakdown.alt === finalGrade ? 'worst' : ''}`}>
+              Alt: {breakdown.alt || '—'}
+            </span>
+            <span className={`grade-chip ${getGradeColorClass(breakdown.spd)} ${breakdown.spd === finalGrade ? 'worst' : ''}`}>
+              Spd: {breakdown.spd || '—'}
+            </span>
+          </div>
+          <div className="summary">{summary || `Rolled out within ±${passTolerances.rolloutHeading}° of entry heading`}</div>
+
+                <div className="ai-feedback">
+                  <div className="ai-feedback-header">
+                    <div className="ai-title-group">
+                      <div className="ai-title">AI Debrief</div>
+                      <svg className="ai-title-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M7.775 3.275a.75.75 0 001.06 1.06l1.25-1.25a2 2 0 112.83 2.83l-2.5 2.5a2 2 0 01-2.83 0 .75.75 0 00-1.06 1.06 3.5 3.5 0 004.95 0l2.5-2.5a3.5 3.5 0 00-4.95-4.95l-1.25 1.25zm-4.69 9.64a2 2 0 010-2.83l2.5-2.5a2 2 0 012.83 0 .75.75 0 001.06-1.06 3.5 3.5 0 00-4.95 0l-2.5 2.5a3.5 3.5 0 004.95 4.95l1.25-1.25a.75.75 0 00-1.06-1.06l-1.25 1.25a2 2 0 01-2.83 0z"/>
+                      </svg>
+                      <svg className="ai-title-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                        <path d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8zM5 12.25v3.25a.25.25 0 00.4.2l1.45-1.087a.25.25 0 01.3 0L8.6 15.7a.25.25 0 00.4-.2v-3.25a.25.25 0 00-.25-.25h-3.5a.25.25 0 00-.25.25z"/>
+                      </svg>
+                    </div>
+                    {!aiFeedback && (
+                      <div className="ai-header-actions">
+                        <button className="ai-feedback-button" onClick={handleAiFeedbackRequest} disabled={aiLoading}>
+                          {aiLoading ? 'Requesting...' : 'Get AI Feedback'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {aiError && <div className="ai-feedback-error">{aiError}</div>}
+                  
+                  {aiFeedback && (
+                    <div className="ai-feedback-content">
+                      <div className="ai-overall-focus">
+                        <div className="ai-overall-focus-label">Overall Focus</div>
+                        <div className="ai-overall-focus-value">
+                          {aiFocus} →
+                        </div>
+                      </div>
+                      
+                      <div className="ai-corrections-section">
+                        <div className="ai-corrections-title">
+                          Top Corrections ({aiFeedback.split('\n').filter(line => {
+                            const trimmed = line.trim();
+                            return trimmed && (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.match(/^\d+[\.\)]/));
+                          }).length || 0})
+                        </div>
+                        <div className="ai-corrections-list">
+                          {aiFeedback.split('\n').filter(line => {
+                            const trimmed = line.trim();
+                            return trimmed && (trimmed.startsWith('•') || trimmed.startsWith('-') || trimmed.match(/^\d+[\.\)]/));
+                          }).slice(0, showAllTips ? undefined : 3).map((line, idx) => {
+                            const trimmed = line.replace(/^[•\-\d+\.\)]\s*/, '').trim();
+                            const isHigh = trimmed.toLowerCase().includes('high') || idx === 0;
+                            const isMed = trimmed.toLowerCase().includes('med') || idx === 1;
+                            const priority = isHigh ? 'high' : isMed ? 'med' : 'low';
+                            const categoryMatch = trimmed.match(/(HIGH|MED|LOW)\s*-\s*(\w+)/i);
+                            const category = categoryMatch ? categoryMatch[2] : ['ENTRY', 'PITCH', 'AIRSPEED', 'BANK', 'ROLLOUT'][idx] || 'GENERAL';
+                            
+                            const parts = trimmed.split(/[\.:]/);
+                            const instruction = parts[0] || trimmed;
+                            const cue = parts.slice(1).join('.').trim();
+                            
+                            return (
+                              <div key={idx} className={`ai-correction-item ${priority}`}>
+                                <div className={`ai-correction-number ${priority}`}>
+                                  {idx + 1}
+                                </div>
+                                <div className="ai-correction-content">
+                                  <div className={`ai-correction-category ${priority}`}>
+                                    {priority.toUpperCase()} - {category}
+                                  </div>
+                                  <div className="ai-correction-instruction">
+                                    {instruction}
+                                  </div>
+                                  {cue && (
+                                    <div className="ai-correction-cue">
+                                      {cue}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      
+                      <div className="ai-feedback-footer">
+                        <div className="ai-footer-actions">
+                          <button className="ai-footer-button" onClick={() => setShowAllTips(!showAllTips)}>
+                            <svg viewBox="0 0 16 16" fill="currentColor" style={{ transform: showAllTips ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                              <path d="M4.427 9.427l3.396 3.396a.25.25 0 00.354 0l3.396-3.396A.25.25 0 0011.396 9H4.604a.25.25 0 00-.177.427z"/>
+                            </svg>
+                            {showAllTips ? 'Show less' : 'Show all tips'}
+                          </button>
+                          <button className="ai-footer-button" onClick={() => {
+                            navigator.clipboard.writeText(aiFeedback);
+                          }}>
+                            <svg viewBox="0 0 16 16" fill="currentColor">
+                              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/>
+                              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25h-7.5z"/>
+                            </svg>
+                            Copy coaching
+                          </button>
+                        </div>
+                        <button className="ai-footer-button" onClick={() => {
+                          setAiFeedback('');
+                          setAiFocus('Altitude');
+                          setAiError('');
+                          setShowAllTips(false);
+                          handleAiFeedbackRequest();
+                        }} disabled={aiLoading}>
+                          <svg viewBox="0 0 16 16" fill="currentColor">
+                            <path fillRule="evenodd" d="M8 2.5a5.487 5.487 0 00-4.131 1.869l1.204 1.204A.25.25 0 014.896 6H1.25A.25.25 0 011 5.75V2.104a.25.25 0 01.427-.177L2.627 3.27A6.991 6.991 0 018 1.5c3.866 0 7 3.134 7 7a6.991 6.991 0 01-1.77 4.627l1.204 1.204A.25.25 0 0114.896 14H11.25a.25.25 0 01-.25-.25v-3.646a.25.25 0 01.427-.177l1.204 1.204A5.487 5.487 0 008 12.5c-3.038 0-5.5-2.462-5.5-5.5S4.962 1.5 8 1.5z"/>
+                          </svg>
+                          Regenerate
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  {!aiFeedback && !aiError && !aiLoading && (
+                    <div className="ai-feedback-placeholder">
+                      Tap the button to fetch personalized coaching from the AI.
+                    </div>
+                  )}
                 </div>
-                <div className="summary">{summary || `Rolled out within ±${passTolerances.rolloutHeading}° of entry heading`}</div>
 
                 <div className="deviations-list">
                   <div className="deviation-row">
