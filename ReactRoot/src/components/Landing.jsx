@@ -161,16 +161,36 @@ export default function Landing({ user }) {
     loadRunways()
   }, [user])
 
-  // Load saved landing paths for current runway
+  // Load saved landing paths for current runway (including connected users)
   useEffect(() => {
     async function loadLandingPaths() {
       if (!user || !selectedRunway) return
       
       try {
+        // Get accepted connections (both as student and instructor)
+        const { data: relationships, error: relError } = await supabase
+          .from('instructor_relationships')
+          .select('student_id, instructor_id, status')
+          .or(`and(student_id.eq.${user.id},status.eq.accepted),and(instructor_id.eq.${user.id},status.eq.accepted)`)
+        
+        // Collect all connected user IDs (including own)
+        const connectedUserIds = [user.id] // Include own paths
+        if (!relError && relationships) {
+          relationships.forEach(rel => {
+            if (rel.student_id === user.id) {
+              connectedUserIds.push(rel.instructor_id)
+            } else if (rel.instructor_id === user.id) {
+              connectedUserIds.push(rel.student_id)
+            }
+          })
+        }
+        
+        // Load paths from all connected users
         const { data, error } = await supabase
           .from('landing_paths')
           .select('id, path_name, path_data, created_at, user_id')
           .eq('runway_id', selectedRunway)
+          .in('user_id', connectedUserIds)
           .order('created_at', { ascending: false })
           .limit(50)
         
