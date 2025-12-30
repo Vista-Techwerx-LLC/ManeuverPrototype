@@ -1,21 +1,21 @@
 .approach-path {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--spacing-xl);
 }
 
 .view-container {
   background: rgba(0, 0, 0, 0.3);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-md);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .view-header {
-  font-size: 0.9rem;
+  font-size: var(--font-size-small);
   font-weight: 600;
   color: #4a9eff;
-  margin-bottom: 8px;
+  margin-bottom: var(--gap-sm);
   text-align: center;
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -28,5 +28,6 @@
   background: rgba(0, 0, 0, 0.5);
   border-radius: 6px;
 }
+
 
 

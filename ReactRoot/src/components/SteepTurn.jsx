@@ -803,8 +803,8 @@ export default function SteepTurn({ user }) {
     }
   }
 
-  async function handleAiFeedbackRequest() {
-    if (aiFeedback) {
+  async function handleAiFeedbackRequest(force = false) {
+    if (aiFeedback && !force) {
       return
     }
 
@@ -1326,11 +1326,8 @@ export default function SteepTurn({ user }) {
                           </button>
                         </div>
                         <button className="ai-footer-button" onClick={() => {
-                          setAiFeedback('');
-                          setAiFocus('Altitude');
-                          setAiError('');
                           setShowAllTips(false);
-                          handleAiFeedbackRequest();
+                          handleAiFeedbackRequest(true);
                         }} disabled={aiLoading}>
                           <svg viewBox="0 0 16 16" fill="currentColor">
                             <path fillRule="evenodd" d="M8 2.5a5.487 5.487 0 00-4.131 1.869l1.204 1.204A.25.25 0 014.896 6H1.25A.25.25 0 011 5.75V2.104a.25.25 0 01.427-.177L2.627 3.27A6.991 6.991 0 018 1.5c3.866 0 7 3.134 7 7a6.991 6.991 0 01-1.77 4.627l1.204 1.204A.25.25 0 0114.896 14H11.25a.25.25 0 01-.25-.25v-3.646a.25.25 0 01.427-.177l1.204 1.204A5.487 5.487 0 008 12.5c-3.038 0-5.5-2.462-5.5-5.5S4.962 1.5 8 1.5z"/>

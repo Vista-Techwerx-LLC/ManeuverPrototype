@@ -1,8 +1,8 @@
 .auto-start-container {
-  margin-top: 16px;
-  padding: 16px;
+  margin-top: var(--spacing-lg);
+  padding: var(--spacing-lg);
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 8px;
+  border-radius: var(--border-radius-md);
   border: 1px solid var(--border);
 }
 
@@ -208,5 +208,49 @@
 .auto-start-status.countdown {
   background: rgba(255, 193, 7, 0.2);
   color: var(--yellow);
+}
+
+@media (max-width: 768px) {
+  .auto-start-header {
+    flex-wrap: wrap;
+  }
+
+  .toggle-slider {
+    width: 40px;
+    height: 22px;
+  }
+
+  .toggle-slider::before {
+    width: 18px;
+    height: 18px;
+  }
+
+  .auto-start-toggle input[type="checkbox"]:checked + .toggle-slider::before {
+    transform: translateX(18px);
+  }
+}
+
+@media (max-width: 480px) {
+  .toggle-slider {
+    width: 36px;
+    height: 20px;
+  }
+
+  .toggle-slider::before {
+    width: 16px;
+    height: 16px;
+  }
+
+  .auto-start-toggle input[type="checkbox"]:checked + .toggle-slider::before {
+    transform: translateX(16px);
+  }
+
+  .skill-level-selector {
+    flex-direction: column;
+  }
+
+  .skill-level-btn {
+    width: 100%;
+  }
 }
 

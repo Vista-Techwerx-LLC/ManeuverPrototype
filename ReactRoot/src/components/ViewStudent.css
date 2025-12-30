@@ -1,6 +1,6 @@
 .view-student-page {
   min-height: 100vh;
-  padding: 24px;
+  padding: var(--padding-page);
   background: linear-gradient(135deg, #0a0e27 0%, #1a1f3a 100%);
   color: #fff;
 }
@@ -13,20 +13,20 @@
 .student-header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
+  gap: var(--spacing-lg);
+  margin-bottom: var(--gap-2xl);
 }
 
 .student-header h1 {
   margin: 0;
-  font-size: 28px;
+  font-size: var(--font-size-h1);
   font-weight: 600;
 }
 
 .student-email {
   color: var(--text-muted);
-  font-size: 14px;
-  margin: 4px 0 0 0;
+  font-size: var(--font-size-small);
+  margin: var(--spacing-xs) 0 0 0;
 }
 
 .back-btn {
@@ -55,6 +55,38 @@
 @media (max-width: 800px) {
   .stats-cards {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .student-header {
+    flex-wrap: wrap;
+  }
+
+  .stats-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .maneuver-header {
+    flex-wrap: wrap;
+  }
+
+  .details-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .deviation-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 480px) {
+  .stats-cards {
+    grid-template-columns: 1fr;
   }
 }
 
