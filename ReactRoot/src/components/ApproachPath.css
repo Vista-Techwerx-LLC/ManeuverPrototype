@@ -29,5 +29,14 @@
   border-radius: 6px;
 }
 
+.side-profile-container {
+  max-height: 500px;
+}
+
+.side-profile-container .path-canvas {
+  height: 400px;
+  max-height: 400px;
+}
+
 
 

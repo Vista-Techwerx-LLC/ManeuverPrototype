@@ -5,9 +5,25 @@ import {
   JKA_AIRPORT,
   calculateDistance,
   calculateLateralDeviation,
-  calculateBearing
+  calculateBearing,
+  normalizeAngle
 } from '../utils/landingStandards'
 import './ApproachPath.css'
+
+function determineApproachThreshold(runway, aircraftData, flightPath) {
+  if (!runway) return null
+
+  if (flightPath && flightPath.length > 0) {
+    const endPoint = flightPath[flightPath.length - 1]
+    if (endPoint?.lat != null && endPoint?.lon != null) {
+      const distToThreshold = calculateDistance(endPoint.lat, endPoint.lon, runway.threshold.lat, runway.threshold.lon)
+      const distToOpposite = calculateDistance(endPoint.lat, endPoint.lon, runway.oppositeEnd.lat, runway.oppositeEnd.lon)
+      return distToThreshold <= distToOpposite ? runway.threshold : runway.oppositeEnd
+    }
+  }
+
+  return runway.threshold
+}
 
 export default function ApproachPath({
   runway,
@@ -16,17 +32,34 @@ export default function ApproachPath({
   currentPhase,
   glidepathDeviation,
   distanceToThreshold,
-  selectedLandingPath = null
+  selectedLandingPath = null,
+  replayIndex = null,
+  isReplayMode = false
 }) {
   const topViewCanvasRef = useRef(null)
   const sideViewCanvasRef = useRef(null)
 
+  const effectiveAircraftData = isReplayMode && replayIndex != null && flightPath && flightPath[replayIndex]
+    ? {
+        lat: flightPath[replayIndex].lat,
+        lon: flightPath[replayIndex].lon,
+        alt_ft: flightPath[replayIndex].alt,
+        hdg_true: flightPath[replayIndex].heading,
+        bank_deg: flightPath[replayIndex].bank,
+        pitch_deg: flightPath[replayIndex].pitch,
+        ias_kt: flightPath[replayIndex].airspeed,
+        vs_fpm: flightPath[replayIndex].vs_fpm
+      }
+    : aircraftData
+
+  const dataToUse = effectiveAircraftData
+
   useEffect(() => {
-    if (!runway || !aircraftData) return
+    if (!runway || !effectiveAircraftData) return
 
     drawTopView()
     drawSideView()
-  }, [runway, aircraftData, flightPath, currentPhase, selectedLandingPath])
+  }, [runway, effectiveAircraftData, flightPath, currentPhase, selectedLandingPath, replayIndex, isReplayMode])
 
   function drawTopView() {
     const canvas = topViewCanvasRef.current
@@ -51,13 +84,13 @@ export default function ApproachPath({
     let aircraftDistance = null
     let aircraftLateralDev = null
     
-    if (aircraftData && aircraftData.lat && aircraftData.lon) {
+    if (dataToUse && dataToUse.lat && dataToUse.lon) {
       aircraftDistance = calculateDistance(
-        aircraftData.lat, aircraftData.lon,
+        dataToUse.lat, dataToUse.lon,
         runway.threshold.lat, runway.threshold.lon
       )
       aircraftLateralDev = calculateLateralDeviation(
-        aircraftData.lat, aircraftData.lon,
+        dataToUse.lat, dataToUse.lon,
         runway.threshold.lat, runway.threshold.lon,
         runway.oppositeEnd.lat, runway.oppositeEnd.lon
       )
@@ -79,8 +112,8 @@ export default function ApproachPath({
       runwayY = aircraftDistance * scale // Positive Y is toward threshold
     }
     
-    // Draw runway (if within view - within 10 NM of aircraft)
-    if (aircraftDistance != null && aircraftDistance <= 10) {
+    // Draw runway (if within view - within 15 NM of aircraft)
+    if (aircraftDistance != null && aircraftDistance <= 15) {
       const runwayLengthPx = (runway.length / 6076) * scale // Convert feet to NM to pixels
       const runwayWidthPx = (runway.width / 6076) * scale
       
@@ -107,7 +140,7 @@ export default function ApproachPath({
       ctx.stroke()
       
       // Draw glidepath gates (relative to runway threshold)
-      const gates = ['1.5NM', '1.0NM', '0.5NM']
+      const gates = ['5.0NM', '4.0NM', '3.0NM', '2.0NM', '1.5NM', '1.0NM', '0.5NM']
       gates.forEach(gateName => {
         const gate = GLIDEPATH.gates[gateName]
         const gateY = runwayY - gate.distance * scale // Gate is before threshold
@@ -131,7 +164,7 @@ export default function ApproachPath({
     }
     
     // Draw selected landing path (reference path) if provided
-    if (selectedLandingPath && selectedLandingPath.length > 3 && aircraftData) {
+    if (selectedLandingPath && selectedLandingPath.length > 3 && dataToUse) {
       // Check if aircraft is currently on/near the landing path
       let isOnPath = false
       let minDistToPath = Infinity
@@ -139,7 +172,7 @@ export default function ApproachPath({
       // Check distance to all points on the path
       selectedLandingPath.forEach((point) => {
         const distToPoint = calculateDistance(
-          aircraftData.lat, aircraftData.lon,
+          dataToUse.lat, dataToUse.lon,
           point.lat, point.lon
         )
         minDistToPath = Math.min(minDistToPath, distToPoint)
@@ -154,14 +187,14 @@ export default function ApproachPath({
       
       // Calculate distance and bearing from aircraft to path start
       const distToPathStart = calculateDistance(
-        aircraftData.lat, aircraftData.lon,
+        dataToUse.lat, dataToUse.lon,
         pathStart.lat, pathStart.lon
       )
       
       // Draw blue dotted line to path start (only if not on path and not already close to start)
-      if (!isOnPath && distToPathStart > 0.5 && distToPathStart <= 10) {
+      if (!isOnPath && distToPathStart > 0.5 && distToPathStart <= 15) {
         const bearingToStart = calculateBearing(
-          aircraftData.lat, aircraftData.lon,
+          dataToUse.lat, dataToUse.lon,
           pathStart.lat, pathStart.lon
         )
         
@@ -195,14 +228,18 @@ export default function ApproachPath({
         // Distance from point to aircraft
         const distToAircraft = calculateDistance(
           point.lat, point.lon,
-          aircraftData.lat, aircraftData.lon
+          dataToUse.lat, dataToUse.lon
         )
         
-        // Only include points within 10 NM of aircraft (view range)
-        if (distToAircraft <= 10) {
+        // Include points within 15 NM of aircraft or 20 NM of threshold (extended view range)
+        const distToThreshold = calculateDistance(
+          point.lat, point.lon,
+          runway.threshold.lat, runway.threshold.lon
+        )
+        if (distToAircraft <= 15 || distToThreshold <= 20) {
           // Calculate bearing from aircraft to point
           const bearing = calculateBearing(
-            aircraftData.lat, aircraftData.lon,
+            dataToUse.lat, dataToUse.lon,
             point.lat, point.lon
           )
           
@@ -370,18 +407,29 @@ export default function ApproachPath({
       const validPoints = []
       
       // Calculate all points relative to current aircraft position
+      // For landing approaches, show ALL points in the flight path that are part of the approach
+      // This ensures the complete path is visible, not just what's near the current aircraft position
       flightPath.forEach((point) => {
-        // Distance from point to current aircraft
+        // Distance from point to current aircraft (for positioning)
         const distToAircraft = calculateDistance(
           point.lat, point.lon,
-          aircraftData.lat, aircraftData.lon
+          dataToUse.lat, dataToUse.lon
         )
         
-        // Only include points within 10 NM of aircraft (view range)
-        if (distToAircraft <= 10) {
-          // Calculate bearing from aircraft to point
+        // Distance from point to runway threshold
+        const distToThreshold = calculateDistance(
+          point.lat, point.lon,
+          runway.threshold.lat, runway.threshold.lon
+        )
+        
+        // Include ALL points that are:
+        // 1. Within 15 NM of aircraft (normal view range), OR
+        // 2. Within 20 NM of runway threshold (full approach range)
+        // This ensures we see the complete approach path from start to threshold and beyond
+        if (distToAircraft <= 15 || distToThreshold <= 20) {
+          // Calculate bearing from aircraft to point for positioning
           const bearing = calculateBearing(
-            aircraftData.lat, aircraftData.lon,
+            dataToUse.lat, dataToUse.lon,
             point.lat, point.lon
           )
           
@@ -427,13 +475,13 @@ export default function ApproachPath({
     }
     
     // Draw aircraft position (always at center when we have position data)
-    if (aircraftData && aircraftData.lat && aircraftData.lon) {
+    if (dataToUse && dataToUse.lat && dataToUse.lon) {
       // Aircraft symbol (at center, 0, 0)
       ctx.save()
       ctx.translate(0, 0) // Aircraft is always at center
       // Icon is drawn pointing UP (nose at -Y).
       // Rotate to match aircraft heading (0° = North = up)
-      const headingRad = (aircraftData.hdg_true - 90) * Math.PI / 180 // -90 to make 0° point up
+      const headingRad = (dataToUse.hdg_true - 90) * Math.PI / 180 // -90 to make 0° point up
       ctx.rotate(headingRad)
       
       // Draw aircraft icon
@@ -475,7 +523,7 @@ export default function ApproachPath({
     ctx.font = '12px monospace'
     
     // Show runway info if within view
-    if (aircraftDistance != null && aircraftDistance <= 10) {
+    if (aircraftDistance != null && aircraftDistance <= 15) {
       ctx.fillText(`RWY ${runway.heading}°`, centerX - 30, height - 10)
     }
     
@@ -498,8 +546,8 @@ export default function ApproachPath({
     ctx.fillText('W', -25, 5)
     
     // Current heading indicator
-    if (aircraftData && aircraftData.hdg_true != null) {
-      const headingRad = (aircraftData.hdg_true - 90) * Math.PI / 180
+    if (dataToUse && dataToUse.hdg_true != null) {
+      const headingRad = (dataToUse.hdg_true - 90) * Math.PI / 180
       ctx.strokeStyle = '#ffff00'
       ctx.lineWidth = 2
       ctx.beginPath()
@@ -519,50 +567,123 @@ export default function ApproachPath({
     const width = canvas.width
     const height = canvas.height
     
-    // Clear canvas
     ctx.clearRect(0, 0, width, height)
-    
-    // Set up coordinate system
-    const scale = 50 // pixels per NM horizontal
-    const altScale = 0.3 // pixels per foot vertical
-    const centerX = width - 50 // Threshold on right
-    const baselineY = height - 30 // Ground level
 
-    // Draw ground
+    const PROFILE_DISTANCE_NM = 7.0
+    const INTERCEPT_DISTANCE_NM = 5.0
+    const ALT_FLOOR_PADDING_FT = 50
+    const TOP_ALT_MSL = 2500
+    const LEFT_PADDING = 70
+    const BOTTOM_PADDING = 30
+    
+    const TICK_MARK_LENGTH = 6
+    const TICK_MARK_SPACING_NM = 1
+    const TICK_MARK_LABEL_OFFSET_Y = 16
+    const TICK_MARK_LABEL_OFFSET_X = -5
+    
+    const GLIDEPATH_DOT_SIZE_SMALL = 3
+    const GLIDEPATH_DOT_SIZE_LARGE = 4
+    const GLIDEPATH_DOT_DISTANCE_THRESHOLD = 1
+    const GLIDEPATH_DOT_LABEL_OFFSET_X = -20
+    const GLIDEPATH_DOT_LABEL_OFFSET_Y = -10
+
+    const interceptAltMsl = GLIDEPATH.getTargetAltitude(INTERCEPT_DISTANCE_NM).msl
+    const thresholdAltMsl = GLIDEPATH.getTargetAltitude(0).msl
+    const approachThreshold = runway.threshold
+
+    const topAltMsl = TOP_ALT_MSL
+    const bottomAltMsl = Math.max(0, thresholdAltMsl - ALT_FLOOR_PADDING_FT)
+    const altRangeFt = Math.max(1, topAltMsl - bottomAltMsl)
+
+    const RIGHT_PADDING = 40
+    const usableWidth = width - LEFT_PADDING - RIGHT_PADDING
+    const distToX = (distNm) => {
+      const clamped = Math.max(0, Math.min(PROFILE_DISTANCE_NM, distNm))
+      const normalized = (clamped / PROFILE_DISTANCE_NM) * usableWidth
+      return LEFT_PADDING + normalized
+    }
+
+    const altToY = (altMsl) => {
+      const a = Math.max(bottomAltMsl, Math.min(topAltMsl, altMsl))
+      return height - BOTTOM_PADDING - ((a - bottomAltMsl) / altRangeFt) * (height - BOTTOM_PADDING)
+    }
+
+    const distanceFromApproachThreshold = (point) => {
+      if (!point || !approachThreshold) return 0
+      return calculateDistance(point.lat, point.lon, approachThreshold.lat, approachThreshold.lon)
+    }
+
+    const baselineY = height - BOTTOM_PADDING
+    const axisY = Math.round(baselineY) + 1
+    const centerX = LEFT_PADDING
+
     ctx.strokeStyle = '#4a4a4a'
-    ctx.lineWidth = 2
+    ctx.lineWidth = 1
     ctx.beginPath()
-    ctx.moveTo(0, baselineY)
-    ctx.lineTo(width, baselineY)
+    ctx.moveTo(LEFT_PADDING, axisY)
+    ctx.lineTo(width, axisY)
     ctx.stroke()
-    
-    // Draw field elevation reference
-    const fieldElevationY = baselineY - (JKA_AIRPORT.elevation * altScale)
-    
-    // Draw glidepath
+
+    const tickStep = 500
+    const firstTick = Math.ceil(bottomAltMsl / tickStep) * tickStep
+    for (let alt = firstTick; alt <= topAltMsl; alt += tickStep) {
+      const y = altToY(alt)
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.12)'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(LEFT_PADDING, y)
+      ctx.lineTo(width, y)
+      ctx.stroke()
+
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'
+      ctx.beginPath()
+      ctx.moveTo(LEFT_PADDING - 8, y)
+      ctx.lineTo(LEFT_PADDING - 2, y)
+      ctx.stroke()
+
+      ctx.fillStyle = 'rgba(255,255,255,0.75)'
+      ctx.font = '12px monospace'
+      ctx.fillText(`${alt}`, 6, y + 4)
+    }
+
+    const levelStartX = distToX(PROFILE_DISTANCE_NM)
+    const levelEndX = distToX(INTERCEPT_DISTANCE_NM)
+    const levelY = altToY(interceptAltMsl)
+
+    ctx.beginPath()
+    ctx.moveTo(levelStartX, levelY)
+    ctx.lineTo(levelEndX, levelY)
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)'
+    ctx.lineWidth = 2
+    ctx.setLineDash([])
+    ctx.stroke()
+
+    const descentStartX = distToX(INTERCEPT_DISTANCE_NM)
+    const descentStartY = altToY(interceptAltMsl)
+    const descentEndX = distToX(0)
+    const descentEndY = altToY(thresholdAltMsl)
+
+    ctx.beginPath()
+    ctx.moveTo(descentStartX, descentStartY)
+    ctx.lineTo(descentEndX, descentEndY)
     ctx.strokeStyle = '#4a9eff'
     ctx.lineWidth = 2
-    ctx.setLineDash([5, 5])
-    ctx.beginPath()
-    ctx.moveTo(centerX, fieldElevationY)
-    
-    // Draw 3° glidepath up to 5 NM
-    for (let dist = 0; dist <= 5; dist += 0.1) {
-      const targetAlt = GLIDEPATH.getTargetAltitude(dist)
-      const x = centerX - (dist * scale)
-      const y = baselineY - (targetAlt.msl * altScale)
-      
-      if (dist === 0) {
-        ctx.moveTo(x, y)
-      } else {
-        ctx.lineTo(x, y)
-      }
-    }
+    ctx.setLineDash([6, 6])
     ctx.stroke()
     ctx.setLineDash([])
-    
-    // Draw pattern altitude
-    const patternAltY = baselineY - (JKA_AIRPORT.patternAltitude * altScale)
+
+    const fafX = distToX(INTERCEPT_DISTANCE_NM)
+    const fafY = altToY(interceptAltMsl)
+    ctx.beginPath()
+    ctx.arc(fafX, fafY, 4, 0, Math.PI * 2)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+    ctx.font = '12px monospace'
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'
+    ctx.fillText('GS INT', fafX + 8, fafY - 8)
+
+    const patternAltY = altToY(JKA_AIRPORT.patternAltitude)
     ctx.strokeStyle = '#ffa500'
     ctx.lineWidth = 1
     ctx.setLineDash([3, 3])
@@ -575,24 +696,30 @@ export default function ApproachPath({
     ctx.fillStyle = '#ffa500'
     ctx.font = '10px monospace'
     ctx.fillText(`${JKA_AIRPORT.patternAltitude} ft`, 5, patternAltY - 5)
-    
-    // Draw gates
-    const gates = ['1.5NM', '1.0NM', '0.5NM']
+
+    const gates = ['5.0NM', '4.0NM', '3.0NM', '2.0NM', '1.0NM', '0.5NM']
     gates.forEach(gateName => {
       const gate = GLIDEPATH.gates[gateName]
-      const x = centerX - (gate.distance * scale)
-      const y = baselineY - (gate.targetAltitudeMSL * altScale)
-      
-      ctx.fillStyle = '#4a9eff'
-      ctx.beginPath()
-      ctx.arc(x, y, 4, 0, Math.PI * 2)
-      ctx.fill()
-      
-      ctx.font = '10px monospace'
-      ctx.fillText(gateName, x - 20, y - 10)
+      if (gate) {
+        if (gate.distance <= PROFILE_DISTANCE_NM) {
+          const x = distToX(gate.distance)
+          const calculatedAlt = GLIDEPATH.getTargetAltitude(gate.distance).msl
+          const y = altToY(calculatedAlt)
+
+          ctx.fillStyle = '#4a9eff'
+          ctx.beginPath()
+          const dotSize = gate.distance < GLIDEPATH_DOT_DISTANCE_THRESHOLD ? GLIDEPATH_DOT_SIZE_SMALL : GLIDEPATH_DOT_SIZE_LARGE
+          ctx.arc(x, y, dotSize, 0, Math.PI * 2)
+          ctx.fill()
+
+          if (gate.distance >= 2 || gate.distance === 1) {
+            ctx.font = '10px monospace'
+            ctx.fillText(gateName, x + GLIDEPATH_DOT_LABEL_OFFSET_X, y + GLIDEPATH_DOT_LABEL_OFFSET_Y)
+          }
+        }
+      }
     })
-    
-    // Draw flight path (only if airborne and has actual data)
+
     if (flightPath && flightPath.length > 3) {
       ctx.strokeStyle = '#00ff88'
       ctx.lineWidth = 2
@@ -600,16 +727,12 @@ export default function ApproachPath({
       
       let pathDrawn = false
       flightPath.forEach((point, idx) => {
-        const dist = calculateDistance(
-          point.lat, point.lon,
-          runway.threshold.lat, runway.threshold.lon
-        )
+        const distFromThreshold = distanceFromApproachThreshold(point)
         
-        const x = centerX - (dist * scale)
-        const y = baselineY - (point.alt * altScale)
-        
-        // Only draw points within reasonable range
-        if (x >= 0 && x <= width && y >= 0 && y <= height) {
+        if (distFromThreshold <= PROFILE_DISTANCE_NM) {
+          const x = distToX(Math.max(0, distFromThreshold))
+          const y = altToY(point.alt)
+          
           if (idx === 0 || !pathDrawn) {
             ctx.moveTo(x, y)
             pathDrawn = true
@@ -623,11 +746,11 @@ export default function ApproachPath({
         ctx.stroke()
       }
     }
-    
-    // Draw aircraft position
-    if (aircraftData && distanceToThreshold != null) {
-      const x = centerX - (distanceToThreshold * scale)
-      const y = baselineY - (aircraftData.alt_ft * altScale)
+
+    if (dataToUse) {
+      const distanceToThreshold = distanceFromApproachThreshold(dataToUse)
+      const x = distToX(Math.max(0, distanceToThreshold))
+      const y = altToY(dataToUse.alt_ft)
       
       // Aircraft symbol
       ctx.fillStyle = '#ffff00'
@@ -642,11 +765,11 @@ export default function ApproachPath({
       // Altitude label
       ctx.fillStyle = '#ffff00'
       ctx.font = '12px monospace'
-      ctx.fillText(`${Math.round(aircraftData.alt_ft)} ft`, x + 10, y - 10)
+      ctx.fillText(`${Math.round(dataToUse.alt_ft)} ft`, x + 10, y - 10)
       
-      // Glidepath deviation indicator
       if (glidepathDeviation != null && Math.abs(glidepathDeviation) > 10) {
-        const targetY = baselineY - ((aircraftData.alt_ft - glidepathDeviation) * altScale)
+        const targetAltMsl = dataToUse.alt_ft - glidepathDeviation
+        const targetY = altToY(targetAltMsl)
         
         ctx.strokeStyle = glidepathDeviation > 0 ? '#ff4444' : '#ff8844'
         ctx.lineWidth = 2
@@ -667,21 +790,26 @@ export default function ApproachPath({
         )
       }
     }
-    
-    // Distance scale
+
     ctx.fillStyle = '#aaa'
     ctx.font = '10px monospace'
-    for (let dist = 0; dist <= 5; dist += 1) {
-      const x = centerX - (dist * scale)
-      ctx.fillText(`${dist}`, x - 5, baselineY + 15)
+    for (let dist = 0; dist <= PROFILE_DISTANCE_NM; dist += TICK_MARK_SPACING_NM) {
+      const x = Math.round(distToX(dist)) + 0.5
+      ctx.strokeStyle = '#aaa'
+      ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(x, axisY - TICK_MARK_LENGTH / 2)
+      ctx.lineTo(x, axisY + TICK_MARK_LENGTH / 2)
+      ctx.stroke()
+      ctx.fillText(`${dist}`, x + TICK_MARK_LABEL_OFFSET_X, axisY + TICK_MARK_LABEL_OFFSET_Y)
     }
-    ctx.fillText('NM', centerX - (5.5 * scale), baselineY + 15)
-    
-    // Labels
+    ctx.fillText('NM', distToX(PROFILE_DISTANCE_NM) + 10, axisY + TICK_MARK_LABEL_OFFSET_Y)
+
     ctx.fillStyle = '#fff'
     ctx.font = '12px monospace'
     ctx.fillText('3° Glidepath', 10, 20)
-    ctx.fillText('Threshold', centerX - 40, baselineY + 15)
+    const thresholdLabelX = distToX(0) + 6
+    ctx.fillText('Threshold', thresholdLabelX, axisY + TICK_MARK_LABEL_OFFSET_Y)
   }
 
   return (
@@ -696,12 +824,12 @@ export default function ApproachPath({
         />
       </div>
       
-      <div className="view-container">
+      <div className="view-container side-profile-container">
         <div className="view-header">Side Profile</div>
         <canvas 
           ref={sideViewCanvasRef}
-          width={400}
-          height={200}
+          width={600}
+          height={400}
           className="path-canvas"
         />
       </div>

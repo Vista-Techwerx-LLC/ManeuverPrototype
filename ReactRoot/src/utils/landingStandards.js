@@ -113,10 +113,46 @@ export const GLIDEPATH = {
   
   // Gates on final approach (distance from threshold in NM)
   gates: {
+    '5.0NM': {
+      distance: 5.0,
+      targetAltitudeMSL: 1517,
+      targetAltitudeAGL: 1500,
+      toleranceAlt: 150,
+      toleranceSpeed: 10,
+      targetSpeed: 'Vref+15',
+      verticalSpeed: { min: 500, max: 1000 }
+    },
+    '4.0NM': {
+      distance: 4.0,
+      targetAltitudeMSL: 1217,
+      targetAltitudeAGL: 1200,
+      toleranceAlt: 125,
+      toleranceSpeed: 10,
+      targetSpeed: 'Vref+15',
+      verticalSpeed: { min: 500, max: 1000 }
+    },
+    '3.0NM': {
+      distance: 3.0,
+      targetAltitudeMSL: 917,
+      targetAltitudeAGL: 900,
+      toleranceAlt: 125,
+      toleranceSpeed: 10,
+      targetSpeed: 'Vref+15',
+      verticalSpeed: { min: 500, max: 1000 }
+    },
+    '2.0NM': {
+      distance: 2.0,
+      targetAltitudeMSL: 617,
+      targetAltitudeAGL: 600,
+      toleranceAlt: 100,
+      toleranceSpeed: 10,
+      targetSpeed: 'Vref+10',
+      verticalSpeed: { min: 400, max: 900 }
+    },
     '1.5NM': {
       distance: 1.5,
-      targetAltitudeMSL: 495,
-      targetAltitudeAGL: 478,
+      targetAltitudeMSL: 467,
+      targetAltitudeAGL: 450,
       toleranceAlt: 100,
       toleranceSpeed: 5,
       targetSpeed: 'Vref+10', // relative to Vref
@@ -124,8 +160,8 @@ export const GLIDEPATH = {
     },
     '1.0NM': {
       distance: 1.0,
-      targetAltitudeMSL: 335,
-      targetAltitudeAGL: 318,
+      targetAltitudeMSL: 317,
+      targetAltitudeAGL: 300,
       toleranceAlt: 75,
       toleranceSpeed: 5,
       targetSpeed: 'Vref+5 to Vref+10',
@@ -133,8 +169,8 @@ export const GLIDEPATH = {
     },
     '0.5NM': {
       distance: 0.5,
-      targetAltitudeMSL: 175,
-      targetAltitudeAGL: 158,
+      targetAltitudeMSL: 167,
+      targetAltitudeAGL: 150,
       toleranceAlt: 50,
       toleranceSpeed: 5,
       targetSpeed: 'Vref+5',

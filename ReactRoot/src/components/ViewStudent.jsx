@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts'
 import { getSteepTurnPassTolerances, SKILL_LEVELS } from '../utils/autoStartTolerances'
 import FlightPath3D from './FlightPath3D'
+import ApproachPathReplay from './ApproachPathReplay'
+import { hydrateRunway } from '../utils/runwayHelpers'
 import './ViewStudent.css'
 
 async function loadCustomRunways(user) {
@@ -492,6 +494,7 @@ function ManeuverCard({ maneuver, customRunways }) {
   const isPassed = maneuver.grade === 'PASS'
   const date = new Date(maneuver.created_at)
   const skillLevel = maneuver.skill_level
+  const replayRunway = hydrateRunway(details?.runway, customRunways)
   const isSteepTurn = maneuver.maneuver_type === 'steep_turn'
   const isLanding = maneuver.maneuver_type === 'landing'
   const isPathFollowing = maneuver.maneuver_type === 'path_following'
@@ -621,6 +624,13 @@ function ManeuverCard({ maneuver, customRunways }) {
 
               {details.flightPath && details.flightPath.length > 0 && (
                 <div className="details-section">
+                  {replayRunway && (
+                    <ApproachPathReplay
+                      runway={replayRunway}
+                      flightPath={details.flightPath}
+                      referencePath={details.referencePath}
+                    />
+                  )}
                   <FlightPath3D 
                     flightPath={details.flightPath} 
                     entry={details.entry}

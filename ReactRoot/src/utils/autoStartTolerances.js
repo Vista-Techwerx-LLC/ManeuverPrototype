@@ -76,6 +76,17 @@ export const AUTO_START_TOLERANCES = {
       heading: 12,
       bank: 12
     }
+  },
+  [MANEUVER_TYPES.LANDING]: {
+    [SKILL_LEVELS.BEGINNER]: {
+      entryRadiusNm: 0.6
+    },
+    [SKILL_LEVELS.NOVICE]: {
+      entryRadiusNm: 0.45
+    },
+    [SKILL_LEVELS.ACS]: {
+      entryRadiusNm: 0.35
+    }
   }
 }
 

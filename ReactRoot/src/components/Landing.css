@@ -651,12 +651,20 @@
 
 /* Grade Card */
 .grade-card .grade {
-  font-size: 3rem;
+  font-size: 3.5rem;
   font-weight: 900;
-  text-align: center;
-  margin: 20px 0;
-  padding: 20px;
-  border-radius: 12px;
+  width: 140px;
+  height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 20px 10px;
+  border-radius: 20px;
+  border: 2px solid currentColor;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.45);
+  background: rgba(15, 15, 20, 0.85);
+  position: relative;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.45);
 }
 
 .grade-card .grade.pass {
@@ -669,6 +677,134 @@
   background: linear-gradient(135deg, rgba(255, 68, 68, 0.2), rgba(204, 0, 0, 0.2));
   color: #ff4444;
   border: 2px solid #ff4444;
+}
+
+.grade-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin: 24px 0 18px;
+}
+
+.skill-level-badge {
+  padding: 4px 12px;
+  background: rgba(90, 160, 255, 0.15);
+  border: 1px solid rgba(90, 160, 255, 0.6);
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #8ecbff;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+
+.grade-breakdown {
+  margin: 24px 0;
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.grade-breakdown h3 {
+  margin: 0 0 20px 0;
+  font-size: 1.1rem;
+  color: #ddd;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.breakdown-grid {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin: 0 auto;
+}
+
+.breakdown-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 160px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  gap: 12px;
+  box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.2);
+}
+
+.breakdown-item span:first-child {
+  color: #aaa;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.breakdown-item span:last-child {
+  font-weight: 700;
+  font-size: 1.1rem;
+  font-family: 'Courier New', monospace;
+  text-align: right;
+  min-width: 60px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid transparent;
+}
+
+.breakdown-item .pass {
+  color: #00ff88;
+}
+
+.breakdown-item .fail {
+  color: #ff4444;
+}
+
+.breakdown-item .grade-green {
+  color: #00ff88;
+}
+
+.breakdown-item .grade-yellow {
+  color: #ffd700;
+}
+
+.breakdown-item .grade-red {
+  color: #ff4444;
+}
+
+.grade-card .grade-green {
+  background: linear-gradient(135deg, rgba(0, 255, 136, 0.2), rgba(0, 212, 170, 0.2));
+  color: #00ff88;
+  border: 2px solid #00ff88;
+}
+
+.grade-card .grade-yellow {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.2), rgba(255, 200, 0, 0.2));
+  color: #ffd700;
+  border: 2px solid #ffd700;
+}
+
+.grade-card .grade-red {
+  background: linear-gradient(135deg, rgba(255, 68, 68, 0.2), rgba(204, 0, 0, 0.2));
+  color: #ff4444;
+  border: 2px solid #ff4444;
+}
+
+.grade-card.grade-green {
+  border-color: rgba(0, 255, 136, 0.3);
+}
+
+.grade-card.grade-yellow {
+  border-color: rgba(255, 215, 0, 0.3);
+}
+
+.grade-card.grade-red {
+  border-color: rgba(255, 68, 68, 0.3);
 }
 
 /* Touchdown Summary */

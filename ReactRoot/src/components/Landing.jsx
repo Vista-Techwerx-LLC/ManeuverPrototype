@@ -14,12 +14,14 @@ import {
   normalizeAngle
 } from '../utils/landingStandards'
 import ApproachPath from './ApproachPath'
+import ApproachPathReplay from './ApproachPathReplay'
 import RunwayCalibration, { loadCustomRunways } from './RunwayCalibration'
 import FlightPath3D from './FlightPath3D'
+import AutoStart from './AutoStart'
 import { gradePathFollowing } from '../utils/pathFollowingGrading'
 import { fetchPathFollowingFeedback } from '../lib/aiFeedback'
 import { getGradeColorClass } from '../utils/steepTurnGrading'
-import { SKILL_LEVELS } from '../utils/autoStartTolerances'
+import { SKILL_LEVELS, MANEUVER_TYPES, AUTO_START_TOLERANCES } from '../utils/autoStartTolerances'
 import './Landing.css'
 
 // Helper function to convert heading to cardinal direction
@@ -92,6 +94,9 @@ function getRunwayDisplayName(runwayId, customRunways) {
   return airportName ? `${customRunway.name} (${airportName})` : customRunway.name
 }
 
+const DEFAULT_RUNWAY_NAMES = ['KJKA 9', 'KJKA 9 (Jack Edwards)']
+const DEFAULT_LANDING_PATH_NAME = 'KJKA 9 (nose dive before runway)'
+
 const saveInProgress = new Set()
 
 async function saveLandingToDatabase(userId, landingData) {
@@ -156,6 +161,7 @@ export default function Landing({ user }) {
   const [pathFollowingResult, setPathFollowingResult] = useState(null)
   const pathStartReached = useRef(false) // Track if we've reached the start of the path
   const pathFollowingCompleting = useRef(false) // Prevent multiple completion calls
+  const [nearRunwayButNotPath, setNearRunwayButNotPath] = useState(false) // Track if close to runway but not path
   const [pathFollowingSkillLevel, setPathFollowingSkillLevel] = useState('acs') // Skill level: beginner, novice, acs
   const [currentPathFollowingId, setCurrentPathFollowingId] = useState(null) // Database ID for AI feedback
   const [aiFeedback, setAiFeedback] = useState(null)
@@ -172,6 +178,11 @@ export default function Landing({ user }) {
   const touchdownData = useRef(null)
   const dropdownRef = useRef(null)
   const pathDropdownRef = useRef(null)
+  const startTrackingRef = useRef(() => {})
+  const autoStartTriggered = useRef(false)
+  const [autoStartEnabled, setAutoStartEnabled] = useState(true)
+  const [autoStartSkillLevel, setAutoStartSkillLevel] = useState(SKILL_LEVELS.ACS)
+  const [autoStartStatus, setAutoStartStatus] = useState(null)
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -195,6 +206,14 @@ export default function Landing({ user }) {
     }
     loadRunways()
   }, [user])
+
+  useEffect(() => {
+    if (selectedRunway !== '27') return
+    const defaultRunway = customRunways.find(rwy => DEFAULT_RUNWAY_NAMES.includes(rwy.name))
+    if (defaultRunway) {
+      setSelectedRunway(defaultRunway.id)
+    }
+  }, [customRunways, selectedRunway])
 
   // Load saved landing paths for current runway (including connected users)
   useEffect(() => {
@@ -240,6 +259,21 @@ export default function Landing({ user }) {
     }
     loadLandingPaths()
   }, [user, selectedRunway])
+
+  useEffect(() => {
+    if (selectedLandingPath || savedLandingPaths.length === 0) return
+    const defaultPath = savedLandingPaths.find(path =>
+      path.path_name?.toLowerCase().includes('kjka 9')
+    )
+    if (defaultPath) {
+      setSelectedLandingPath(defaultPath.id)
+    }
+  }, [savedLandingPaths, selectedLandingPath])
+
+  const activeLandingPath = useMemo(() => {
+    if (!selectedLandingPath) return null
+    return savedLandingPaths.find(path => path.id === selectedLandingPath) || null
+  }, [savedLandingPaths, selectedLandingPath])
 
   // Save current flight path as a landing path
   async function saveCurrentPath() {
@@ -467,11 +501,16 @@ export default function Landing({ user }) {
 
     // Track deviations from reference path if path following is active
     if (pathFollowingTracking && pathFollowingTracking.referencePath && isAirborne && isMoving) {
-      // Check if we've reached the path (anywhere on the path, not just the start)
+      // Check if we should start tracking based on distance from runway threshold AND flight path
+      // Start tracking only when BOTH conditions are met: close to runway AND close to path
       if (!pathStartReached.current) {
-        let minDistToPath = Infinity
+        const distanceToThreshold = calculateDistance(
+          data.lat, data.lon,
+          runway.threshold.lat, runway.threshold.lon
+        )
         
-        // Check distance to all points on the path
+        // Calculate minimum distance to any point on the flight path
+        let minDistToPath = Infinity
         pathFollowingTracking.referencePath.forEach((point) => {
           const distToPoint = calculateDistance(
             data.lat, data.lon,
@@ -480,10 +519,26 @@ export default function Landing({ user }) {
           minDistToPath = Math.min(minDistToPath, distToPoint)
         })
         
-        // Consider path reached if within 0.3 NM of any point on the path
-        if (minDistToPath <= 0.3) {
+        // Detect current landing phase based on distance from runway
+        const phase = detectLandingPhase(data, runway, previousPhase.current)
+        
+        // Check if in approach range (within 5 NM of threshold or in BASE/FINAL phase)
+        const inApproachRange = phase === LANDING_PHASES.BASE || phase === LANDING_PHASES.FINAL || distanceToThreshold <= 5
+        
+        // Check if close to the flight path (within 0.3 NM)
+        const closeToPath = minDistToPath <= 0.3
+        
+        // Start tracking only if BOTH: in approach range AND close to path
+        if (inApproachRange && closeToPath) {
           pathStartReached.current = true
-          console.log('Path reached! Beginning deviation tracking.')
+          setNearRunwayButNotPath(false)
+          console.log(`Landing phase detected (${phase}) and on flight path! Beginning deviation tracking.`)
+        } else if (inApproachRange && !closeToPath) {
+          // Close to runway but not on path - show message
+          setNearRunwayButNotPath(true)
+        } else {
+          // Not in approach range yet
+          setNearRunwayButNotPath(false)
         }
       }
       
@@ -505,8 +560,20 @@ export default function Landing({ user }) {
         })
         
         if (closestPoint && minDistance <= 2) { // Only track if within 2 NM of the path
+          // Calculate distance to threshold for glide path calculation
+          const distanceToThreshold = calculateDistance(
+            data.lat, data.lon,
+            runway.threshold.lat, runway.threshold.lon
+          )
+          
           // Calculate deviations
-          const altDev = data.alt_ft - closestPoint.alt
+          // Altitude deviation should be from glide path, not reference path point
+          const targetGlidepath = distanceToThreshold < 5 
+            ? GLIDEPATH.getTargetAltitude(distanceToThreshold)
+            : null
+          const altDev = targetGlidepath 
+            ? data.alt_ft - targetGlidepath.msl
+            : data.alt_ft - closestPoint.alt // Fallback to reference path if too far
           const speedDev = data.ias_kt - closestPoint.airspeed
           const bankDev = (data.bank_deg || 0) - (closestPoint.bank || 0)
           const pitchDev = (data.pitch_deg || 0) - (closestPoint.pitch || 0)
@@ -541,7 +608,7 @@ export default function Landing({ user }) {
                 speedDev,
                 bankDev,
                 pitchDev,
-                closestPointAlt: closestPoint.alt,
+                closestPointAlt: targetGlidepath ? targetGlidepath.msl : closestPoint.alt,
                 closestPointSpeed: closestPoint.airspeed
               }],
               deviations: [...prev.deviations, {
@@ -638,10 +705,74 @@ export default function Landing({ user }) {
     } else {
       setPathFollowingTracking(null)
       pathStartReached.current = false
+      setNearRunwayButNotPath(false)
     }
     
     console.log('Started tracking landing approach')
   }
+
+  useEffect(() => {
+    startTrackingRef.current = startTracking
+  }, [startTracking])
+
+  useEffect(() => {
+    if (!tracking) {
+      autoStartTriggered.current = false
+    }
+  }, [tracking])
+
+  useEffect(() => {
+    if (!autoStartEnabled) {
+      setAutoStartStatus(null)
+      return
+    }
+
+    if (tracking || state !== 'ready' || recordingPath || !connected || !data || !runway) {
+      setAutoStartStatus({ type: 'monitoring', message: 'Waiting for a ready approach to auto-start' })
+      return
+    }
+
+    if (!activeLandingPath?.path_data?.length) {
+      setAutoStartStatus({ type: 'monitoring', message: 'Select a landing path to enable Auto-Start' })
+      return
+    }
+
+    if (autoStartTriggered.current) return
+
+    const landingTolerance = AUTO_START_TOLERANCES[MANEUVER_TYPES.LANDING]?.[autoStartSkillLevel] || { entryRadiusNm: 0.3 }
+    const entryRadius = landingTolerance.entryRadiusNm ?? 0.3
+
+    let distanceToPath = Infinity
+    activeLandingPath.path_data.forEach(point => {
+      if (point?.lat == null || point?.lon == null) return
+      const dist = calculateDistance(data.lat, data.lon, point.lat, point.lon)
+      if (dist < distanceToPath) {
+        distanceToPath = dist
+      }
+    })
+
+    if (distanceToPath === Infinity) return
+
+    if (distanceToPath <= entryRadius) {
+      setAutoStartStatus({ type: 'ready', message: `Auto-start ready (≤ ${entryRadius.toFixed(2)} NM)` })
+      console.log('Autostart: entering landing path, starting tracking')
+      autoStartTriggered.current = true
+      startTrackingRef.current()
+      return
+    }
+
+    setAutoStartStatus({
+      type: 'monitoring',
+      message: `Distance to landing path ${distanceToPath.toFixed(2)} NM (need ≤ ${entryRadius.toFixed(2)} NM)`
+    })
+  }, [activeLandingPath, autoStartEnabled, autoStartSkillLevel, connected, data, recordingPath, runway, selectedLandingPath, state, tracking])
+
+  useEffect(() => {
+    if (!autoStartEnabled) {
+      autoStartTriggered.current = false
+      setAutoStartStatus(null)
+    }
+  }, [autoStartEnabled])
 
   function stopTracking() {
     // If path following is active and we've started tracking, complete it
@@ -652,6 +783,7 @@ export default function Landing({ user }) {
       setTracking(false)
       setState('ready')
       setCurrentPhase(LANDING_PHASES.NONE)
+      setNearRunwayButNotPath(false)
     }
   }
 
@@ -1083,6 +1215,7 @@ export default function Landing({ user }) {
     setAiFocus(null)
     setAiError('')
     pathStartReached.current = false
+    setNearRunwayButNotPath(false)
     pathFollowingCompleting.current = false
     hasBeenSaved.current = false
     previousPhase.current = LANDING_PHASES.NONE
@@ -1502,6 +1635,15 @@ export default function Landing({ user }) {
                   </div>
                 </label>
 
+                <AutoStart
+                  enabled={autoStartEnabled}
+                  skillLevel={autoStartSkillLevel}
+                  onToggle={(enabled) => setAutoStartEnabled(enabled)}
+                  onSkillLevelChange={setAutoStartSkillLevel}
+                  status={autoStartStatus}
+                  maneuverType={MANEUVER_TYPES.LANDING}
+                />
+
                 <label style={{ marginBottom: '8px', display: 'block' }}>
                   Skill Level
                 </label>
@@ -1633,10 +1775,21 @@ export default function Landing({ user }) {
                     <h2>Path Following - {pathFollowingTracking.pathName}</h2>
                     {!pathStartReached.current ? (
                       <div style={{ padding: '20px', textAlign: 'center', color: '#4a9eff' }}>
-                        <div style={{ fontSize: '1.2rem', marginBottom: '8px' }}>⏳ Waiting for Path Start</div>
-                        <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
-                          Navigate to the start of the path to begin tracking deviations
-                        </div>
+                        {nearRunwayButNotPath ? (
+                          <>
+                            <div style={{ fontSize: '1.2rem', marginBottom: '8px', color: '#ffa500' }}>⚠️ Near Runway, But Not on Flight Path</div>
+                            <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
+                              You're in approach range but not on the landing path. Navigate to the flight path to begin tracking deviations.
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: '1.2rem', marginBottom: '8px' }}>⏳ Approaching Landing Path</div>
+                            <div style={{ fontSize: '0.9rem', color: '#aaa' }}>
+                              Fly to the landing path to begin tracking deviations. Tracking will start automatically when you're within approach range and on the flight path.
+                            </div>
+                          </>
+                        )}
                       </div>
                     ) : (
                       <div className="live-values">
@@ -1679,20 +1832,6 @@ export default function Landing({ user }) {
                     )}
                   </div>
                 )}
-
-                {/* Approach Path Visualization */}
-                <div className="card">
-                  <h2>Approach Path</h2>
-                  <ApproachPath
-                    runway={runway}
-                    aircraftData={data}
-                    flightPath={flightPath}
-                    currentPhase={currentPhase}
-                    glidepathDeviation={glidepathDeviation}
-                    distanceToThreshold={distanceToThreshold}
-                    selectedLandingPath={selectedLandingPath ? savedLandingPaths.find(p => p.id === selectedLandingPath)?.path_data : null}
-                  />
-                </div>
 
                 {/* Glidepath Indicator (on final) */}
                 {currentPhase === LANDING_PHASES.FINAL && targetGlidepath && (
@@ -1739,6 +1878,22 @@ export default function Landing({ user }) {
                   </div>
                 )}
               </>
+            )}
+
+            {/* Approach Path Visualization - Show when tracking OR autostart is enabled */}
+            {(tracking || (autoStartEnabled && connected && data && runway)) && (
+              <div className="card">
+                <h2>Approach Path</h2>
+                <ApproachPath
+                  runway={runway}
+                  aircraftData={data}
+                  flightPath={flightPath}
+                  currentPhase={currentPhase}
+                  glidepathDeviation={glidepathDeviation}
+                  distanceToThreshold={distanceToThreshold}
+                  selectedLandingPath={selectedLandingPath ? savedLandingPaths.find(p => p.id === selectedLandingPath)?.path_data : null}
+                />
+              </div>
             )}
 
             {/* Complete Summary */}
@@ -1797,7 +1952,6 @@ export default function Landing({ user }) {
 
             {pathFollowingResult && (
               <div className={`card grade-card ${getGradeColorClass(pathFollowingResult.grade)}`}>
-                <h2>Path Following Complete</h2>
                 <div className="grade-header">
                   <div className={`grade ${getGradeColorClass(pathFollowingResult.grade)}`}>
                     {pathFollowingResult.grade}
@@ -1889,12 +2043,11 @@ export default function Landing({ user }) {
                 </div>
 
                 {pathFollowingResult.flightPath && pathFollowingResult.flightPath.length > 0 && (
-                  <div style={{ marginTop: '24px' }}>
-                    <FlightPath3D 
+                  <>
+                    <ApproachPathReplay
+                      runway={runway}
                       flightPath={pathFollowingResult.flightPath}
-                      entry={pathFollowingResult.flightPath[0]}
                       referencePath={pathFollowingResult.referencePath || (() => {
-                        // Fallback: Get reference path from saved paths if available
                         if (pathFollowingResult.pathName && savedLandingPaths.length > 0) {
                           const refPath = savedLandingPaths.find(p => p.path_name === pathFollowingResult.pathName)
                           return refPath?.path_data || null
@@ -1902,7 +2055,22 @@ export default function Landing({ user }) {
                         return null
                       })()}
                     />
-                  </div>
+                    <div style={{ marginTop: '24px' }}>
+                      <FlightPath3D 
+                        flightPath={pathFollowingResult.flightPath}
+                        entry={pathFollowingResult.flightPath[0]}
+                        referencePath={pathFollowingResult.referencePath || (() => {
+                          if (pathFollowingResult.pathName && savedLandingPaths.length > 0) {
+                            const refPath = savedLandingPaths.find(p => p.path_name === pathFollowingResult.pathName)
+                            return refPath?.path_data || null
+                          }
+                          return null
+                        })()}
+                        runway={runway}
+                        runwayName={getRunwayDisplayName(selectedRunway, customRunways)}
+                      />
+                    </div>
+                  </>
                 )}
 
                 {/* AI Feedback Section */}

@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { fetchSteepTurnFeedback, fetchPathFollowingFeedback } from '../lib/aiFeedback'
 import FlightPath3D from './FlightPath3D'
+import ApproachPathReplay from './ApproachPathReplay'
 import { getSteepTurnPassTolerances, SKILL_LEVELS } from '../utils/autoStartTolerances'
 import { getGradeColorClass } from '../utils/steepTurnGrading'
+import { hydrateRunway } from '../utils/runwayHelpers'
 import './History.css'
 
 async function loadCustomRunways(user) {
@@ -329,6 +331,7 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
   const isPassed = !isFailGrade(gradeText)
   const date = new Date(maneuver.created_at)
   const skillLevel = maneuver.skill_level
+  const replayRunway = hydrateRunway(details?.runway, customRunways)
 
   useEffect(() => {
     if (expanded && details?.ai_feedback) {
@@ -693,6 +696,13 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
 
           {details.flightPath && details.flightPath.length > 0 && (
             <div className="details-section">
+              {replayRunway && (
+                <ApproachPathReplay
+                  runway={replayRunway}
+                  flightPath={details.flightPath}
+                  referencePath={details.referencePath}
+                />
+              )}
               <FlightPath3D 
                 flightPath={details.flightPath} 
                 entry={details.entry}

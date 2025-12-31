@@ -1,11 +1,26 @@
 import { useEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import './FlightPath3D.css'
+import { GLIDEPATH } from '../utils/landingStandards'
+
+const getAltitudeGuideClass = (deviation) => {
+  const absDev = Math.abs(deviation)
+  if (absDev <= 100) return 'good'
+  if (absDev <= 150) return 'warning'
+  return 'bad'
+}
+
+const getBankGuideClass = (bank) => {
+  const absBank = Math.abs(bank || 0)
+  if (absBank <= 5) return 'good'
+  if (absBank <= 12) return 'warning'
+  return 'bad'
+}
 
 // Track component instances
 let instanceCounter = 0
 
-export default function FlightPath3D({ flightPath, entry, referencePath }) {
+export default function FlightPath3D({ flightPath, entry, referencePath, runway, runwayName }) {
   const instanceId = useRef(++instanceCounter)
   const containerRef = useRef(null)
   const sceneRef = useRef(null)
@@ -136,11 +151,21 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
     // Convert lat/lon to local coordinates
     const originLat = entry?.lat || flightPath[0]?.lat || (minLat + maxLat) / 2
     const originLon = entry?.lon || flightPath[0]?.lon || (minLon + maxLon) / 2
-    const originAlt = entry?.altitude || entry?.alt || flightPath[0]?.alt || (minAlt + maxAlt) / 2
+    const runwayElevation = runway?.threshold?.elevation ?? runway?.oppositeEnd?.elevation ?? entry?.alt ?? entry?.altitude
+    const centerAlt = runwayElevation ?? (minAlt + maxAlt) / 2
+    const originAlt = centerAlt
     originAltRef.current = originAlt
 
     const latToMeters = 111320
     const lonToMeters = 111320 * Math.cos((originLat * Math.PI) / 180)
+
+    const toLocalVector = (lat, lon, alt = originAlt) => new THREE.Vector3(
+      (lon - originLon) * lonToMeters,
+      (alt - originAlt) * 0.3048,
+      -(lat - originLat) * latToMeters
+    )
+
+    const landingVisuals = []
 
     // Create flight path points with full data
     const pathPoints = []
@@ -156,6 +181,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
       pathPoints.push(new THREE.Vector3(x, y, z))
       pathData.push({
         position: new THREE.Vector3(x, y, z),
+        lat: point.lat,
+        lon: point.lon,
         alt: point.alt,
         heading: point.heading || 0,
         bank: point.bank || 0,
@@ -850,10 +877,122 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
     gridHelper.position.set(center.x, 0, center.z)
     scene.add(gridHelper)
 
+    if (runway?.threshold && runway.oppositeEnd) {
+      const thresholdVec = toLocalVector(
+        runway.threshold.lat,
+        runway.threshold.lon,
+        runway.threshold.elevation ?? originAlt
+      )
+      const oppositeVec = toLocalVector(
+        runway.oppositeEnd.lat,
+        runway.oppositeEnd.lon,
+        runway.oppositeEnd.elevation ?? originAlt
+      )
+      const runwayLengthMeters = Math.max(2, thresholdVec.distanceTo(oppositeVec))
+      const runwayWidthMeters = Math.max(2, (runway.width || 100) * 0.3048)
+      const runwayCenter = thresholdVec.clone().lerp(oppositeVec, 0.5)
+      const runwayDir = oppositeVec.clone().sub(thresholdVec).normalize()
+      const runwayYaw = Math.atan2(runwayDir.x, runwayDir.z)
+      const runwayMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(runwayLengthMeters, 0.2, runwayWidthMeters),
+        new THREE.MeshStandardMaterial({
+          color: 0x10121c,
+          metalness: 0.3,
+          roughness: 0.75
+        })
+      )
+      runwayMesh.position.set(runwayCenter.x, 0.1, runwayCenter.z)
+      runwayMesh.rotation.y = runwayYaw
+      runwayMesh.receiveShadow = true
+      runwayMesh.castShadow = true
+      scene.add(runwayMesh)
+      landingVisuals.push(runwayMesh)
+      const centerLineGeometry = new THREE.BufferGeometry().setFromPoints([thresholdVec, oppositeVec])
+      const centerLineMaterial = new THREE.LineBasicMaterial({
+        color: 0xffffff,
+        linewidth: 1,
+        transparent: true,
+        opacity: 0.65
+      })
+      const centerLine = new THREE.Line(centerLineGeometry, centerLineMaterial)
+      scene.add(centerLine)
+      landingVisuals.push(centerLine)
+      const thresholdMarker = new THREE.Mesh(
+        new THREE.CylinderGeometry(Math.max(runwayWidthMeters * 0.35, 0.5), Math.max(runwayWidthMeters * 0.35, 0.5), 0.3, 12),
+        new THREE.MeshStandardMaterial({
+          color: 0xff4444,
+          emissive: 0xff4444,
+          emissiveIntensity: 0.75,
+          metalness: 0.2,
+          roughness: 0.4
+        })
+      )
+      thresholdMarker.position.set(thresholdVec.x, 0.15, thresholdVec.z)
+      scene.add(thresholdMarker)
+      landingVisuals.push(thresholdMarker)
+      const headingRad = ((runway.heading || 0) * Math.PI) / 180
+      const approachDir = new THREE.Vector3(Math.sin(headingRad), 0, -Math.cos(headingRad)).normalize()
+      const inboundDir = approachDir.clone().negate()
+      const glideDistances = [5, 4, 3, 2, 1, 0.5, 0]
+      const glidePoints = glideDistances.map((dist) => {
+        const offset = inboundDir.clone().multiplyScalar(dist * 1852)
+        const point = thresholdVec.clone().add(offset)
+        const targetAltitude = GLIDEPATH.getTargetAltitude(dist).msl
+        point.y = (targetAltitude - originAlt) * 0.3048
+        return point
+      })
+      if (glidePoints.length >= 2) {
+        const glideGeometry = new THREE.BufferGeometry().setFromPoints(glidePoints)
+        const glideMaterial = new THREE.LineBasicMaterial({
+          color: 0x4ad3ff,
+          linewidth: 2
+        })
+        const glideLine = new THREE.Line(glideGeometry, glideMaterial)
+        scene.add(glideLine)
+        landingVisuals.push(glideLine)
+      }
+      if (pathPoints.length > 0) {
+        const touchdownPoint = pathPoints[pathPoints.length - 1]
+        const touchdownSphere = new THREE.Mesh(
+          new THREE.SphereGeometry(6, 16, 16),
+          new THREE.MeshStandardMaterial({
+            color: 0xffc24d,
+            emissive: 0xffc24d,
+            emissiveIntensity: 0.8,
+            metalness: 0.2,
+            roughness: 0.4
+          })
+        )
+        touchdownSphere.position.copy(touchdownPoint)
+        touchdownSphere.position.y = Math.max(touchdownSphere.position.y, 0.2)
+        scene.add(touchdownSphere)
+        landingVisuals.push(touchdownSphere)
+      }
+    }
+
     // Position camera
     const size = box.getSize(new THREE.Vector3())
     const maxDim = Math.max(size.x, size.y, size.z)
-    const distance = maxDim * 2.5
+    const horizontalDim = Math.max(size.x, size.z)
+    const verticalDim = size.y
+    
+    // For landing paths (long horizontal, short vertical), use a closer camera distance
+    // Calculate aspect ratio: if horizontal is much larger than vertical, it's likely a landing approach
+    const aspectRatio = horizontalDim / Math.max(verticalDim, 1)
+    
+    // Adjust distance based on path characteristics
+    // Landing paths (high aspect ratio) get closer camera, steep turns (low aspect ratio) get standard distance
+    let distance
+    if (aspectRatio > 10) {
+      // Landing approach: use vertical dimension as base, with horizontal consideration
+      distance = Math.max(verticalDim * 8, horizontalDim * 0.8)
+    } else if (aspectRatio > 5) {
+      // Mixed path: use weighted average
+      distance = Math.max(verticalDim * 6, horizontalDim * 1.2)
+    } else {
+      // Steep turn or other: use standard calculation
+      distance = maxDim * 2.5
+    }
 
     camera.position.set(
       center.x + distance * 0.7,
@@ -989,6 +1128,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
           if (finalData) {
             planeGroup.position.copy(finalData.position)
             setCurrentData({
+              lat: finalData.lat,
+              lon: finalData.lon,
               alt: finalData.alt,
               bank: finalData.bank,
               heading: finalData.heading,
@@ -1048,9 +1189,10 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
           // Positive bank = right wing down, which in Three.js is positive Z rotation
           planeGroup.rotateZ(bank * Math.PI / 180)
           
-          // Update current data less frequently for better performance
           if (frameCount % 2 === 0) {
           const interpolatedData = {
+              lat: THREE.MathUtils.lerp(currentPathData.lat, nextPathData.lat, t),
+              lon: THREE.MathUtils.lerp(currentPathData.lon, nextPathData.lon, t),
               alt: THREE.MathUtils.lerp(currentPathData.alt, nextPathData.alt, t),
             bank: bank,
             heading: heading,
@@ -1061,8 +1203,17 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
           }
           
           // Optimized camera following with smoother interpolation
-          const followDistance = maxDim * 0.8
-          const followHeight = maxDim * 0.3
+          // Use same distance calculation as initial camera position for consistency
+          const followDistance = aspectRatio > 10 
+            ? Math.max(verticalDim * 6, horizontalDim * 0.6)
+            : aspectRatio > 5
+            ? Math.max(verticalDim * 5, horizontalDim * 0.9)
+            : maxDim * 0.8
+          const followHeight = aspectRatio > 10
+            ? Math.max(verticalDim * 2, horizontalDim * 0.2)
+            : aspectRatio > 5
+            ? Math.max(verticalDim * 1.5, horizontalDim * 0.25)
+            : maxDim * 0.3
           const targetOffset = new THREE.Vector3(
             Math.sin(heading * Math.PI / 180) * followDistance,
             followHeight,
@@ -1117,6 +1268,9 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
       }
     })
 
+    const landingGeometries = landingVisuals.map(obj => obj.geometry).filter(Boolean)
+    const landingMaterials = landingVisuals.map(obj => obj.material).filter(Boolean)
+
     const geometriesToDispose = [
       entryGeometry,
       entryRingGeometry,
@@ -1126,7 +1280,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
       levelFlightGeometry,
       rolloutGeometry,
       ...pointSpheres.map(s => s.geometry),
-      ...pathGroupGeometries
+      ...pathGroupGeometries,
+      ...landingGeometries
     ].filter(Boolean)
     const materialsToDispose = [
       entryMaterial,
@@ -1137,7 +1292,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
       levelFlightMaterial,
       rolloutMaterial,
       ...pointSpheres.map(s => s.material),
-      ...pathGroupMaterials
+      ...pathGroupMaterials,
+      ...landingMaterials
     ].filter(Boolean)
 
     // Cleanup
@@ -1189,7 +1345,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
       rendererRef.current = null
       cameraRef.current = null
     }
-  }, [flightPath, entry])
+  }, [flightPath, entry, referencePath, runway])
 
   const togglePlay = () => {
     if (!isPlaying) {
@@ -1217,6 +1373,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
       const firstPoint = flightPath[0]
       if (firstPoint) {
         setCurrentData({
+          lat: firstPoint.lat,
+          lon: firstPoint.lon,
           alt: firstPoint.alt || 0,
           bank: firstPoint.bank || 0,
           heading: firstPoint.heading || 0,
@@ -1265,6 +1423,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
         planeGroupRef.current.rotateZ(bank * Math.PI / 180)
         
         setCurrentData({
+          lat: THREE.MathUtils.lerp(currentPathData.lat, nextPathData.lat, t),
+          lon: THREE.MathUtils.lerp(currentPathData.lon, nextPathData.lon, t),
           alt: THREE.MathUtils.lerp(currentPathData.alt, nextPathData.alt, t),
           bank: bank,
           heading: heading,
@@ -1287,6 +1447,28 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
     seekToProgress(progress)
   }
 
+  const calculateGlidepathDeviation = () => {
+    if (!currentData || !runway?.threshold) {
+      return currentData ? currentData.alt - originAltRef.current : 0
+    }
+    if (currentData.lat == null || currentData.lon == null) {
+      return currentData.alt - originAltRef.current
+    }
+    const R = 6371
+    const dLat = (runway.threshold.lat - currentData.lat) * Math.PI / 180
+    const dLon = (runway.threshold.lon - currentData.lon) * Math.PI / 180
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(currentData.lat * Math.PI / 180) * Math.cos(runway.threshold.lat * Math.PI / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2)
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    const distanceNM = R * c * 0.539957
+    const targetAlt = GLIDEPATH.getTargetAltitude(distanceNM)
+    return currentData.alt - targetAlt.msl
+  }
+  const altitudeDeviation = calculateGlidepathDeviation()
+  const altitudeGuideClass = currentData ? getAltitudeGuideClass(altitudeDeviation) : ''
+  const bankGuideClass = currentData ? getBankGuideClass(currentData.bank) : ''
+
   if (!flightPath || flightPath.length === 0) {
     return (
       <div className="flight-path-3d-container">
@@ -1301,6 +1483,10 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
     <div className="flight-path-3d-container">
       <div className="flight-path-3d-header">
         <h3>3D Flight Path Visualization</h3>
+        <div className="flight-path-3d-meta">
+          {runwayName && <span>{runwayName}</span>}
+          {runway?.heading != null && <span>Heading {runway.heading}°</span>}
+        </div>
         <div className="flight-path-3d-controls-bar">
           <button 
             className="flight-path-control-btn" 
@@ -1347,13 +1533,13 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
             <div className="flight-path-live-data">
               <div className="live-data-item">
                 <span className="live-data-label">Height:</span>
-                <span className={`live-data-value ${Math.abs(currentData.alt - originAltRef.current) <= 100 ? 'good' : Math.abs(currentData.alt - originAltRef.current) <= 150 ? 'warning' : 'bad'}`}>
-                  {(currentData.alt - originAltRef.current >= 0 ? '+' : '') + Math.round(currentData.alt - originAltRef.current)} ft
+                <span className={`live-data-value ${altitudeGuideClass}`}>
+                  {(altitudeDeviation >= 0 ? '+' : '') + Math.round(altitudeDeviation)} ft
                 </span>
               </div>
               <div className="live-data-item">
                 <span className="live-data-label">Bank:</span>
-                <span className={`live-data-value ${Math.abs(Math.abs(currentData.bank) - 45) <= 5 ? 'good' : Math.abs(Math.abs(currentData.bank) - 45) <= 10 ? 'warning' : 'bad'}`}>
+                <span className={`live-data-value ${bankGuideClass}`}>
                   {Math.round(currentData.bank)}°
                 </span>
               </div>
@@ -1363,35 +1549,43 @@ export default function FlightPath3D({ flightPath, entry, referencePath }) {
         <div className="flight-path-3d-legend">
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#00ffff' }}></span>
-            <span>Level Flight (Before Entry)</span>
+            <span>Level Flight (Pre-entry)</span>
           </div>
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#00ffff', borderRadius: '50%' }}></span>
-            <span>Entry Point (Roll Begins)</span>
+            <span>Entry Point (Bank buildup)</span>
           </div>
           <div className="legend-item">
-            <span className="legend-color" style={{ background: '#ff00ff' }}></span>
-            <span>Rollout Segment</span>
+            <span className="legend-color" style={{ background: '#10121c', borderRadius: '2px', border: '1px solid rgba(255,255,255,0.1)' }}></span>
+            <span>Runway Surface</span>
           </div>
           <div className="legend-item">
-            <span className="legend-color" style={{ background: '#ff00ff', borderRadius: '50%' }}></span>
-            <span>Rollout Start (Bank decreases below ½ target bank)</span>
+            <span className="legend-color" style={{ background: '#ffffff' }}></span>
+            <span>Runway Centerline</span>
           </div>
           <div className="legend-item">
-            <span className="legend-color" style={{ background: '#888888', borderRadius: '50%' }}></span>
-            <span>Completion Point</span>
+            <span className="legend-color" style={{ background: '#4ad3ff' }}></span>
+            <span>Glidepath Target</span>
+          </div>
+          <div className="legend-item">
+            <span className="legend-color" style={{ background: '#ff4444', borderRadius: '50%' }}></span>
+            <span>Threshold Marker</span>
+          </div>
+          <div className="legend-item">
+            <span className="legend-color" style={{ background: '#ffc24d', borderRadius: '50%' }}></span>
+            <span>Touchdown Point</span>
           </div>
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#00ff00' }}></span>
-            <span>Good Altitude (±100ft)</span>
+            <span>Altitude Acceptable (±100ft)</span>
           </div>
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#ffff00' }}></span>
-            <span>Warning (±150ft)</span>
+            <span>Altitude Warning (±150ft)</span>
           </div>
           <div className="legend-item">
             <span className="legend-color" style={{ background: '#ff0000' }}></span>
-            <span>Busted Altitude</span>
+            <span>Altitude Busted</span>
           </div>
         </div>
         <div className="flight-path-3d-instructions">
