@@ -8,6 +8,7 @@ import './Telemetry.css'
 export default function Dashboard({ user }) {
   const [sessionId, setSessionId] = useState('')
   const [loading, setLoading] = useState(true)
+  const [isSetupCollapsed, setIsSetupCollapsed] = useState(false)
   const { connected, data } = useWebSocket(user.id)
   const worldRef = useRef(null)
 
@@ -90,39 +91,50 @@ export default function Dashboard({ user }) {
 
 
           <div className="dashboard-card setup-instructions-card">
-            <h2>Setup Instructions</h2>
-            <ol className="setup-steps">
-              <li>
-                <strong>Download the Bridge:</strong> Get <code>MSFS-Bridge.exe</code> from the releases page
-              </li>
-              <li>
-                <strong>Run the bridge:</strong> Double-click <code>MSFS-Bridge.exe</code>
-              </li>
-              <li>
-                <strong>Connect your account:</strong> When the dialog appears, paste your Session ID:
-                <div className="config-example">
-                  <code>{sessionId}</code>
-                  <button 
-                    onClick={() => navigator.clipboard.writeText(sessionId)}
-                    className="copy-btn"
-                  >
-                    Copy Session ID
-                  </button>
-                </div>
-              </li>
-              <li>
-                <strong>Click Connect:</strong> The bridge will save your Session ID and connect automatically
-              </li>
-              <li>
-                <strong>Start MSFS:</strong> Launch Microsoft Flight Simulator and load into a flight
-              </li>
-              <li>
-                <strong>View data:</strong> Open any tracker page here to see live data!
-              </li>
-            </ol>
-            <p style={{marginTop: '16px', color: 'var(--text-muted)', fontSize: '13px'}}>
-              💡 <strong>Tip:</strong> The bridge remembers your Session ID, so you only need to enter it once!
-            </p>
+            <div className="setup-instructions-header">
+              <h2>Setup Instructions</h2>
+              <button 
+                className="collapse-toggle"
+                onClick={() => setIsSetupCollapsed(!isSetupCollapsed)}
+                aria-label={isSetupCollapsed ? 'Expand' : 'Collapse'}
+              >
+                <span className={`collapse-icon ${isSetupCollapsed ? 'collapsed' : ''}`}>▼</span>
+              </button>
+            </div>
+            <div className={`setup-instructions-content ${isSetupCollapsed ? 'collapsed' : ''}`}>
+              <ol className="setup-steps">
+                <li>
+                  <strong>Download the Bridge:</strong> Get <code>MSFS-Bridge.exe</code> from the releases page
+                </li>
+                <li>
+                  <strong>Run the bridge:</strong> Double-click <code>MSFS-Bridge.exe</code>
+                </li>
+                <li>
+                  <strong>Connect your account:</strong> When the dialog appears, paste your Session ID:
+                  <div className="config-example">
+                    <code>{sessionId}</code>
+                    <button 
+                      onClick={() => navigator.clipboard.writeText(sessionId)}
+                      className="copy-btn"
+                    >
+                      Copy Session ID
+                    </button>
+                  </div>
+                </li>
+                <li>
+                  <strong>Click Connect:</strong> The bridge will save your Session ID and connect automatically
+                </li>
+                <li>
+                  <strong>Start MSFS:</strong> Launch Microsoft Flight Simulator and load into a flight
+                </li>
+                <li>
+                  <strong>View data:</strong> Open any tracker page here to see live data!
+                </li>
+              </ol>
+              <p style={{marginTop: '16px', color: 'var(--text-muted)', fontSize: '13px'}}>
+                💡 <strong>Tip:</strong> The bridge remembers your Session ID, so you only need to enter it once!
+              </p>
+            </div>
           </div>
 
           <div className="dashboard-card telemetry-card">

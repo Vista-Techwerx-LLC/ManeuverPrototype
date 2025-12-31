@@ -378,7 +378,6 @@ export default function SlowFlight({ user }) {
         <div className="slow-flight-grid">
           <div className="left-col">
             <div className="card">
-              <h2>Control</h2>
               <div className={`status-badge ${state}`}>
                 ● {state === 'disconnected' ? 'Disconnected' : 
                    state === 'ready' ? 'Ready' : 

@@ -1,10 +1,49 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { fetchSteepTurnFeedback } from '../lib/aiFeedback'
+import { fetchSteepTurnFeedback, fetchPathFollowingFeedback } from '../lib/aiFeedback'
 import FlightPath3D from './FlightPath3D'
 import { getSteepTurnPassTolerances, SKILL_LEVELS } from '../utils/autoStartTolerances'
 import { getGradeColorClass } from '../utils/steepTurnGrading'
 import './History.css'
+
+async function loadCustomRunways(user) {
+  if (!user) return []
+
+  try {
+    // Get accepted connections (both as student and instructor)
+    const { data: relationships, error: relError } = await supabase
+      .from('instructor_relationships')
+      .select('student_id, instructor_id, status')
+      .or(`and(student_id.eq.${user.id},status.eq.accepted),and(instructor_id.eq.${user.id},status.eq.accepted)`)
+
+    // Collect all connected user IDs (including own)
+    const connectedUserIds = new Set([user.id])
+    relationships?.forEach(rel => {
+      if (rel.student_id === user.id) {
+        connectedUserIds.add(rel.instructor_id)
+      } else if (rel.instructor_id === user.id) {
+        connectedUserIds.add(rel.student_id)
+      }
+    })
+
+    const { data: dbRunways, error: dbError } = await supabase
+      .from('custom_runways')
+      .select('user_id, runway_data, runway_name, created_at')
+      .in('user_id', Array.from(connectedUserIds))
+      .order('created_at', { ascending: false })
+
+    if (dbError) {
+      console.error('Error loading runways from database:', dbError)
+      return []
+    }
+
+    // Convert database runways to format expected by the app
+    return dbRunways?.map(r => r.runway_data) || []
+  } catch (error) {
+    console.error('Error loading custom runways:', error)
+    return []
+  }
+}
 
 function getManeuverGrade(maneuver) {
   const finalGrade = maneuver.result_data?.gradeDetails?.finalGrade
@@ -17,6 +56,72 @@ function getManeuverGrade(maneuver) {
   return maneuver.grade === 'PASS' ? 'PASS' : 'FAIL'
 }
 
+function getDisplayManeuverType(maneuverType) {
+  if (maneuverType === 'path_following') {
+    return 'LANDING'
+  }
+  return maneuverType.replace('_', ' ').toUpperCase()
+}
+
+function getRunwayDisplayName(runwayData, customRunways = []) {
+  if (typeof runwayData === 'string') {
+    // Handle old format - just the ID string
+    if (runwayData === '27') {
+      return 'KJKA 27 (Jack Edwards)'
+    }
+    if (runwayData.startsWith('custom_')) {
+      // Look up the runway name from custom runways
+      const customRunway = customRunways.find(r => r.id === runwayData)
+      if (customRunway) {
+        const airportCode = customRunway.name.match(/^([A-Z]{3,4})\s/)?.[1]
+        const airportName = airportCode ? {
+          'KJKA': 'Jack Edwards',
+          'KORD': 'O\'Hare International',
+          'KLAX': 'Los Angeles International',
+          'KJFK': 'John F. Kennedy International',
+          'KATL': 'Hartsfield-Jackson Atlanta International',
+          'KDFW': 'Dallas/Fort Worth International',
+          'KDEN': 'Denver International',
+          'KSFO': 'San Francisco International',
+          'KSEA': 'Seattle-Tacoma International',
+          'KMIA': 'Miami International',
+          'KCLT': 'Charlotte Douglas International',
+          'KPHX': 'Phoenix Sky Harbor International',
+          'KLAS': 'McCarran International',
+          'KMSP': 'Minneapolis-Saint Paul International',
+          'KDTW': 'Detroit Metropolitan',
+          'KBOS': 'Logan International',
+          'KIAD': 'Washington Dulles International',
+          'KIAH': 'George Bush Intercontinental',
+          'KMCO': 'Orlando International',
+          'KEWR': 'Newark Liberty International',
+          'KPHL': 'Philadelphia International',
+          'KBWI': 'Baltimore/Washington International',
+          'KSLC': 'Salt Lake City International',
+          'KSAN': 'San Diego International',
+          'KPDX': 'Portland International',
+          'KMCI': 'Kansas City International',
+          'KAUS': 'Austin-Bergstrom International',
+          'KSTL': 'St. Louis Lambert International',
+          'KBNA': 'Nashville International',
+          'KRDU': 'Raleigh-Durham International',
+        }[airportCode] : null
+        return airportName ? `${customRunway.name} (${airportName})` : customRunway.name
+      }
+      return 'Custom Runway'
+    }
+    return runwayData
+  }
+
+  // Handle new format - object with name property
+  if (runwayData?.name) {
+    return runwayData.name
+  }
+
+  // Fallback
+  return runwayData?.id || 'Unknown'
+}
+
 function isFailGrade(grade) {
   if (!grade) return true
   const gradeUpper = grade.toUpperCase()
@@ -27,9 +132,11 @@ export default function History({ user }) {
   const [maneuvers, setManeuvers] = useState([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('all') // 'all', 'pass', 'fail'
+  const [customRunways, setCustomRunways] = useState([])
 
   useEffect(() => {
     loadManeuvers()
+    loadCustomRunways(user).then(setCustomRunways)
   }, [user.id])
 
   async function loadManeuvers() {
@@ -159,10 +266,11 @@ export default function History({ user }) {
         ) : (
           <div className="maneuver-list">
             {filteredManeuvers.map(maneuver => (
-              <ManeuverCard 
-                key={maneuver.id} 
-                maneuver={maneuver} 
+              <ManeuverCard
+                key={maneuver.id}
+                maneuver={maneuver}
                 onDelete={deleteManeuver}
+                customRunways={customRunways}
               />
             ))}
           </div>
@@ -209,7 +317,7 @@ async function updateManeuverWithFeedback(maneuverId, feedback) {
   }
 }
 
-function ManeuverCard({ maneuver, onDelete }) {
+function ManeuverCard({ maneuver, onDelete, customRunways }) {
   const [expanded, setExpanded] = useState(false)
   const [aiFeedback, setAiFeedback] = useState('')
   const [aiFocus, setAiFocus] = useState('Altitude')
@@ -258,8 +366,8 @@ function ManeuverCard({ maneuver, onDelete }) {
       setAiError('')
     }
 
-    if (maneuver.maneuver_type !== 'steep_turn') {
-      setAiError('AI feedback is only available for steep turn maneuvers')
+    if (maneuver.maneuver_type !== 'steep_turn' && maneuver.maneuver_type !== 'landing' && maneuver.maneuver_type !== 'path_following') {
+      setAiError('AI feedback is only available for steep turn and landing maneuvers')
       return
     }
 
@@ -267,29 +375,47 @@ function ManeuverCard({ maneuver, onDelete }) {
     setAiError('')
 
     try {
-    const payload = {
-      grade: gradeText,
-        gradeDetails: details.gradeDetails || null,
-        details: {
-          entry: details.entry,
-          deviations: details.deviations,
-          averages: details.averages,
-          busted: details.busted,
-          turnDirection: details.turnDirection,
-          totalTurn: details.totalTurn,
-          autoStart: details.autoStart,
-          timestamp: details.timestamp
-        }
-      }
+      let payload, result
 
-      const result = await fetchSteepTurnFeedback({
-        maneuver: payload,
-        maneuverType: 'steep_turn',
-        user: {
-          id: maneuver.user_id,
-          email: null
+      if (maneuver.maneuver_type === 'steep_turn') {
+        payload = {
+          grade: gradeText,
+          gradeDetails: details.gradeDetails || null,
+          details: {
+            entry: details.entry,
+            deviations: details.deviations,
+            averages: details.averages,
+            busted: details.busted,
+            turnDirection: details.turnDirection,
+            totalTurn: details.totalTurn,
+            autoStart: details.autoStart,
+            timestamp: details.timestamp
+          }
         }
-      })
+
+        result = await fetchSteepTurnFeedback({
+          maneuver: payload,
+          maneuverType: 'steep_turn',
+          user: {
+            id: maneuver.user_id,
+            email: null
+          }
+        })
+      } else if (maneuver.maneuver_type === 'landing' || maneuver.maneuver_type === 'path_following') {
+        payload = {
+          grade: gradeText,
+          details: details
+        }
+
+        result = await fetchPathFollowingFeedback({
+          maneuver: payload,
+          maneuverType: maneuver.maneuver_type,
+          user: {
+            id: maneuver.user_id,
+            email: null
+          }
+        })
+      }
       
       if (typeof result === 'object' && result.focus && result.feedback) {
         setAiFocus(result.focus)
@@ -326,7 +452,7 @@ function ManeuverCard({ maneuver, onDelete }) {
       <div className="maneuver-header" onClick={() => setExpanded(!expanded)}>
         <div className="maneuver-info">
           <div className="maneuver-type">
-            {maneuver.maneuver_type.replace('_', ' ').toUpperCase()}
+            {getDisplayManeuverType(maneuver.maneuver_type)}
             {skillLevel && (
               <span className="skill-level-badge">
                 {formatSkillLevel(skillLevel)}
@@ -346,7 +472,7 @@ function ManeuverCard({ maneuver, onDelete }) {
 
       {expanded && details && (
         <div className="maneuver-details">
-          {maneuver.maneuver_type === 'steep_turn' && (
+          {(maneuver.maneuver_type === 'steep_turn' || maneuver.maneuver_type === 'landing' || maneuver.maneuver_type === 'path_following') && (
             <div className="details-section">
               <div className="ai-feedback">
                 <div className="ai-feedback-header">
@@ -367,9 +493,9 @@ function ManeuverCard({ maneuver, onDelete }) {
                     </div>
                   )}
                 </div>
-                
+
                 {aiError && <div className="ai-feedback-error">{aiError}</div>}
-                
+
                 {aiFeedback && (
                   <div className="ai-feedback-content">
                     <div className="ai-overall-focus">
@@ -378,7 +504,7 @@ function ManeuverCard({ maneuver, onDelete }) {
                         {aiFocus} →
                       </div>
                     </div>
-                    
+
                     <div className="ai-corrections-section">
                       <div className="ai-corrections-title">
                         Top Corrections ({aiFeedback.split('\n').filter(line => {
@@ -397,11 +523,11 @@ function ManeuverCard({ maneuver, onDelete }) {
                           const priority = isHigh ? 'high' : isMed ? 'med' : 'low';
                           const categoryMatch = trimmed.match(/(HIGH|MED|LOW)\s*-\s*(\w+)/i);
                           const category = categoryMatch ? categoryMatch[2] : ['ENTRY', 'PITCH', 'AIRSPEED', 'BANK', 'ROLLOUT'][idx] || 'GENERAL';
-                          
+
                           const parts = trimmed.split(/[\.:]/);
                           const instruction = parts[0] || trimmed;
                           const cue = parts.slice(1).join('.').trim();
-                          
+
                           return (
                             <div key={idx} className={`ai-correction-item ${priority}`}>
                               <div className={`ai-correction-number ${priority}`}>
@@ -425,7 +551,7 @@ function ManeuverCard({ maneuver, onDelete }) {
                         })}
                       </div>
                     </div>
-                    
+
                     <div className="ai-feedback-footer">
                       <div className="ai-footer-actions">
                         <button className="ai-footer-button" onClick={() => setShowAllTips(!showAllTips)}>
@@ -456,7 +582,7 @@ function ManeuverCard({ maneuver, onDelete }) {
                     </div>
                   </div>
                 )}
-                
+
                 {!aiFeedback && !aiError && !aiLoading && (
                   <div className="ai-feedback-placeholder">
                     Tap the button to fetch personalized coaching from the AI.
@@ -466,66 +592,70 @@ function ManeuverCard({ maneuver, onDelete }) {
             </div>
           )}
 
-          <div className="details-section">
-            <h3>Entry Parameters</h3>
-            <div className="details-grid">
-              <div>
-                <span className="label">Heading:</span>
-                <span className="value">{Math.round(details.entry?.heading || 0)}°</span>
-              </div>
-              <div>
-                <span className="label">Altitude:</span>
-                <span className="value">{Math.round(details.entry?.altitude || 0)} ft</span>
-              </div>
-              <div>
-                <span className="label">Airspeed:</span>
-                <span className="value">{Math.round(details.entry?.airspeed || 0)} kt</span>
+          {maneuver.maneuver_type === 'steep_turn' && (
+            <div className="details-section">
+              <h3>Entry Parameters</h3>
+              <div className="details-grid">
+                <div>
+                  <span className="label">Heading:</span>
+                  <span className="value">{Math.round(details.entry?.heading || 0)}°</span>
+                </div>
+                <div>
+                  <span className="label">Altitude:</span>
+                  <span className="value">{Math.round(details.entry?.altitude || 0)} ft</span>
+                </div>
+                <div>
+                  <span className="label">Airspeed:</span>
+                  <span className="value">{Math.round(details.entry?.airspeed || 0)} kt</span>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
-          <div className="details-section">
-            <h3>Maximum Deviations</h3>
-            <div className="deviation-grid">
-              {(() => {
-                const maneuverSkillLevel = skillLevel || details.autoStart?.skillLevel || SKILL_LEVELS.ACS
-                const tolerances = getSteepTurnPassTolerances(maneuverSkillLevel)
-                const maxBankTolerance = Math.max(tolerances.bank.max - 45, 45 - tolerances.bank.min)
-                
-                return (
-                  <>
-                    <div className={Math.abs(details.deviations?.maxAltitude || 0) <= tolerances.altitude ? 'pass' : 'fail'}>
-                      <span className="label">Altitude:</span>
-                      <span className="value">
-                        {(details.deviations?.maxAltitude >= 0 ? '+' : '') + 
-                         Math.round(details.deviations?.maxAltitude || 0)} ft
-                      </span>
-                    </div>
-                    <div className={Math.abs(details.deviations?.maxAirspeed || 0) <= tolerances.airspeed ? 'pass' : 'fail'}>
-                      <span className="label">Airspeed:</span>
-                      <span className="value">
-                        {(details.deviations?.maxAirspeed >= 0 ? '+' : '') + 
-                         Math.round(details.deviations?.maxAirspeed || 0)} kt
-                      </span>
-                    </div>
-                    <div className={Math.abs(details.deviations?.maxBank || 0) <= maxBankTolerance ? 'pass' : 'fail'}>
-                      <span className="label">Bank:</span>
-                      <span className="value">
-                        {(details.deviations?.maxBank >= 0 ? '+' : '') + 
-                         Math.round(details.deviations?.maxBank || 0)}° from 45°
-                      </span>
-                    </div>
-                    <div className={(details.deviations?.rolloutHeadingError || 0) <= tolerances.rolloutHeading ? 'pass' : 'fail'}>
-                      <span className="label">Rollout:</span>
-                      <span className="value">{Math.round(details.deviations?.rolloutHeadingError || 0)}°</span>
-                    </div>
-                  </>
-                )
-              })()}
+          {maneuver.maneuver_type === 'steep_turn' && (
+            <div className="details-section">
+              <h3>Maximum Deviations</h3>
+              <div className="deviation-grid">
+                {(() => {
+                  const maneuverSkillLevel = skillLevel || details.autoStart?.skillLevel || SKILL_LEVELS.ACS
+                  const tolerances = getSteepTurnPassTolerances(maneuverSkillLevel)
+                  const maxBankTolerance = Math.max(tolerances.bank.max - 45, 45 - tolerances.bank.min)
+
+                  return (
+                    <>
+                      <div className={Math.abs(details.deviations?.maxAltitude || 0) <= tolerances.altitude ? 'pass' : 'fail'}>
+                        <span className="label">Altitude:</span>
+                        <span className="value">
+                          {(details.deviations?.maxAltitude >= 0 ? '+' : '') +
+                           Math.round(details.deviations?.maxAltitude || 0)} ft
+                        </span>
+                      </div>
+                      <div className={Math.abs(details.deviations?.maxAirspeed || 0) <= tolerances.airspeed ? 'pass' : 'fail'}>
+                        <span className="label">Airspeed:</span>
+                        <span className="value">
+                          {(details.deviations?.maxAirspeed >= 0 ? '+' : '') +
+                           Math.round(details.deviations?.maxAirspeed || 0)} kt
+                        </span>
+                      </div>
+                      <div className={Math.abs(details.deviations?.maxBank || 0) <= maxBankTolerance ? 'pass' : 'fail'}>
+                        <span className="label">Bank:</span>
+                        <span className="value">
+                          {(details.deviations?.maxBank >= 0 ? '+' : '') +
+                           Math.round(details.deviations?.maxBank || 0)}° from 45°
+                        </span>
+                      </div>
+                      <div className={(details.deviations?.rolloutHeadingError || 0) <= tolerances.rolloutHeading ? 'pass' : 'fail'}>
+                        <span className="label">Rollout:</span>
+                        <span className="value">{Math.round(details.deviations?.rolloutHeadingError || 0)}°</span>
+                      </div>
+                    </>
+                  )
+                })()}
+              </div>
             </div>
-          </div>
+          )}
 
-          {details.averages && (
+          {maneuver.maneuver_type === 'steep_turn' && details.averages && (
             <div className="details-section">
               <h3>Averages</h3>
               <div className="details-grid">
@@ -538,7 +668,7 @@ function ManeuverCard({ maneuver, onDelete }) {
                   <span className="value">
                     {Math.round(details.averages?.altitude || 0)} ft
                     <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                      ({(details.averages?.altitudeDeviation >= 0 ? '+' : '') + 
+                      ({(details.averages?.altitudeDeviation >= 0 ? '+' : '') +
                        Math.round(details.averages?.altitudeDeviation || 0)})
                     </span>
                   </span>
@@ -548,7 +678,7 @@ function ManeuverCard({ maneuver, onDelete }) {
                   <span className="value">
                     {Math.round(details.averages?.airspeed || 0)} kt
                     <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                      ({(details.averages?.airspeedDeviation >= 0 ? '+' : '') + 
+                      ({(details.averages?.airspeedDeviation >= 0 ? '+' : '') +
                        Math.round(details.averages?.airspeedDeviation || 0)})
                     </span>
                   </span>
@@ -568,6 +698,119 @@ function ManeuverCard({ maneuver, onDelete }) {
                 entry={details.entry}
               />
             </div>
+          )}
+
+          {(maneuver.maneuver_type === 'landing' || maneuver.maneuver_type === 'path_following') && (
+            <>
+        {details.phaseHistory && details.phaseHistory.length > 0 && (
+          <div className="details-section">
+            <h3>Phase Timeline</h3>
+            <div className="phases-list">
+              {details.phaseHistory.map((phase, idx) => (
+                <li key={idx}>
+                  <div>
+                    <strong>{phase.phase}</strong> @ {new Date(phase.timestamp).toLocaleTimeString()}
+                  </div>
+                  <div>
+                    Alt {Math.round(phase.data?.alt_ft || 0)} ft · Speed {Math.round(phase.data?.ias_kt || 0)} kt
+                  </div>
+                </li>
+              ))}
+            </div>
+          </div>
+        )}
+
+              {details.touchdown && (
+                <div className="details-section">
+                  <h3>Touchdown</h3>
+                  <div className="details-grid">
+                    <div>
+                      <span className="label">Distance from Threshold:</span>
+                      <span className="value">{Math.round(details.touchdown.distanceFromThreshold || 0)} ft</span>
+                    </div>
+                    <div>
+                      <span className="label">Speed:</span>
+                      <span className="value">{Math.round(details.touchdown.airspeed || 0)} kt</span>
+                    </div>
+                    <div>
+                      <span className="label">Vertical Speed:</span>
+                      <span className="value">{Math.round(Math.abs(details.touchdown.verticalSpeed || 0))} fpm</span>
+                    </div>
+                    <div>
+                      <span className="label">Firmness:</span>
+                      <span className={`value ${details.touchdown.firmness === 'hard' ? 'fail' : 'pass'}`}>
+                        {details.touchdown.firmness || 'normal'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {maneuver.maneuver_type === 'path_following' && details.maxDeviations && (
+                <div className="details-section">
+                  <h3>Maximum Deviations</h3>
+                  <div className="deviation-grid">
+                    {details.maxDeviations.altitude !== undefined && (
+                      <div className={Math.abs(details.maxDeviations.altitude) <= 100 ? 'pass' : 'fail'}>
+                        <span className="label">Altitude:</span>
+                        <span className="value">
+                          {(details.maxDeviations.altitude >= 0 ? '+' : '') + Math.round(details.maxDeviations.altitude)} ft
+                        </span>
+                      </div>
+                    )}
+                    {details.maxDeviations.lateral !== undefined && (
+                      <div className={Math.abs(details.maxDeviations.lateral) <= 50 ? 'pass' : 'fail'}>
+                        <span className="label">Lateral:</span>
+                        <span className="value">
+                          {(details.maxDeviations.lateral >= 0 ? '+' : '') + Math.round(details.maxDeviations.lateral)} ft
+                        </span>
+                      </div>
+                    )}
+                    {details.maxDeviations.speed !== undefined && (
+                      <div className={Math.abs(details.maxDeviations.speed) <= 10 ? 'pass' : 'fail'}>
+                        <span className="label">Speed:</span>
+                        <span className="value">
+                          {(details.maxDeviations.speed >= 0 ? '+' : '') + Math.round(details.maxDeviations.speed)} kt
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {details.runway && (
+                <div className="details-section">
+                  <h3>Runway</h3>
+                  <div className="details-grid">
+                    <div>
+                      <span className="label">Runway:</span>
+                      <span className="value">
+                        {getRunwayDisplayName(details.runway, customRunways)}
+                      </span>
+                    </div>
+                    {details.vref && (
+                      <div>
+                        <span className="label">Vref:</span>
+                        <span className="value">{details.vref} kt</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {details.violations && details.violations.length > 0 && (
+                <div className="details-section">
+                  <h3>Violations</h3>
+                  <ul className="violations-list">
+                    {details.violations.map((violation, idx) => (
+                      <li key={idx} style={{color: 'var(--red)'}}>
+                        {violation.message}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
           )}
 
           <button className="delete-btn" onClick={() => onDelete(maneuver.id)}>

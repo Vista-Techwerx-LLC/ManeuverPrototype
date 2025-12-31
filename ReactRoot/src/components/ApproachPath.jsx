@@ -215,25 +215,153 @@ export default function ApproachPath({
         }
       })
       
-      // Draw reference path in orange dotted line
+      // Draw reference path with corridor edges
       if (referencePoints.length > 3) {
+        const corridorWidth = 0.15 * scale
+
+        // Create smoothed edge points with interpolation
+        const smoothedLeftEdge = []
+        const smoothedRightEdge = []
+
+        // First pass: calculate perpendicular vectors at each point
+        const edgeData = referencePoints.map((curr, i) => {
+          const prev = referencePoints[i - 1] || curr
+          const next = referencePoints[i + 1] || curr
+
+          let dx = next.x - prev.x
+          let dy = next.y - prev.y
+          const len = Math.sqrt(dx * dx + dy * dy)
+
+          if (len > 0) {
+            dx /= len
+            dy /= len
+          } else {
+            dx = 0
+            dy = -1
+          }
+
+          const perpX = -dy
+          const perpY = dx
+
+          return {
+            center: curr,
+            left: { x: curr.x + perpX * corridorWidth, y: curr.y + perpY * corridorWidth },
+            right: { x: curr.x - perpX * corridorWidth, y: curr.y - perpY * corridorWidth }
+          }
+        })
+
+        // Create interpolated points for smoother curves
+        for (let i = 0; i < edgeData.length - 1; i++) {
+          const curr = edgeData[i]
+          const next = edgeData[i + 1]
+
+          smoothedLeftEdge.push(curr.left)
+
+          // Add intermediate point for smoother curves
+          const midX = (curr.left.x + next.left.x) / 2
+          const midY = (curr.left.y + next.left.y) / 2
+          smoothedLeftEdge.push({ x: midX, y: midY })
+
+          smoothedRightEdge.push(curr.right)
+
+          const midRightX = (curr.right.x + next.right.x) / 2
+          const midRightY = (curr.right.y + next.right.y) / 2
+          smoothedRightEdge.push({ x: midRightX, y: midRightY })
+        }
+
+        // Add final points
+        if (edgeData.length > 0) {
+          smoothedLeftEdge.push(edgeData[edgeData.length - 1].left)
+          smoothedRightEdge.push(edgeData[edgeData.length - 1].right)
+        }
+
+        // Draw corridor edges with smooth curves
+        ctx.strokeStyle = '#ffa50066'
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([8, 6])
+        ctx.globalAlpha = 0.7
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
+
+        // Draw left edge with smooth curves
+        ctx.beginPath()
+        if (smoothedLeftEdge.length > 0) {
+          ctx.moveTo(smoothedLeftEdge[0].x, smoothedLeftEdge[0].y)
+          for (let i = 1; i < smoothedLeftEdge.length; i++) {
+            const prev = smoothedLeftEdge[i - 1]
+            const curr = smoothedLeftEdge[i]
+            if (i === 1 || i === smoothedLeftEdge.length - 1) {
+              ctx.lineTo(curr.x, curr.y)
+            } else {
+              const controlX = (prev.x + curr.x) / 2
+              const controlY = (prev.y + curr.y) / 2
+              ctx.quadraticCurveTo(controlX, controlY, curr.x, curr.y)
+            }
+          }
+        }
+        ctx.stroke()
+
+        // Draw right edge with smooth curves
+        ctx.beginPath()
+        if (smoothedRightEdge.length > 0) {
+          ctx.moveTo(smoothedRightEdge[0].x, smoothedRightEdge[0].y)
+          for (let i = 1; i < smoothedRightEdge.length; i++) {
+            const prev = smoothedRightEdge[i - 1]
+            const curr = smoothedRightEdge[i]
+            if (i === 1 || i === smoothedRightEdge.length - 1) {
+              ctx.lineTo(curr.x, curr.y)
+            } else {
+              const controlX = (prev.x + curr.x) / 2
+              const controlY = (prev.y + curr.y) / 2
+              ctx.quadraticCurveTo(controlX, controlY, curr.x, curr.y)
+            }
+          }
+        }
+        ctx.stroke()
+
+        ctx.setLineDash([])
+        ctx.globalAlpha = 1.0
+        ctx.lineCap = 'butt'
+        ctx.lineJoin = 'miter'
+
+        // Draw center reference path with smooth curves
         ctx.strokeStyle = '#ffa500'
         ctx.lineWidth = 2.5
         ctx.setLineDash([12, 6])
         ctx.globalAlpha = 0.75
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
         ctx.beginPath()
-        
-        referencePoints.forEach((pt, idx) => {
-          if (idx === 0) {
-            ctx.moveTo(pt.x, pt.y)
-          } else {
-            ctx.lineTo(pt.x, pt.y)
+
+        if (referencePoints.length > 0) {
+          ctx.moveTo(referencePoints[0].x, referencePoints[0].y)
+          
+          // Use quadratic curves for smooth paths
+          for (let i = 1; i < referencePoints.length; i++) {
+            const prev = referencePoints[i - 1]
+            const curr = referencePoints[i]
+            const next = referencePoints[i + 1] || curr
+            
+            if (i === 1) {
+              // First segment: use lineTo
+              ctx.lineTo(curr.x, curr.y)
+            } else if (i === referencePoints.length - 1) {
+              // Last segment: use lineTo
+              ctx.lineTo(curr.x, curr.y)
+            } else {
+              // Middle segments: use quadratic curve with control point at midpoint
+              const controlX = (prev.x + curr.x) / 2
+              const controlY = (prev.y + curr.y) / 2
+              ctx.quadraticCurveTo(controlX, controlY, curr.x, curr.y)
+            }
           }
-        })
-        
+        }
+
         ctx.stroke()
         ctx.setLineDash([])
         ctx.globalAlpha = 1.0
+        ctx.lineCap = 'butt'
+        ctx.lineJoin = 'miter'
       }
     }
     
@@ -270,15 +398,29 @@ export default function ApproachPath({
       if (validPoints.length > 3) {
         ctx.strokeStyle = '#00ff88'
         ctx.lineWidth = 2
+        ctx.lineCap = 'round'
+        ctx.lineJoin = 'round'
         ctx.beginPath()
         
-        validPoints.forEach((pt, idx) => {
-          if (idx === 0) {
-            ctx.moveTo(pt.x, pt.y)
-          } else {
-            ctx.lineTo(pt.x, pt.y)
+        if (validPoints.length > 0) {
+          ctx.moveTo(validPoints[0].x, validPoints[0].y)
+          
+          // Use quadratic curves for smooth paths
+          for (let i = 1; i < validPoints.length; i++) {
+            const prev = validPoints[i - 1]
+            const curr = validPoints[i]
+            
+            if (i === 1) {
+              ctx.lineTo(curr.x, curr.y)
+            } else if (i === validPoints.length - 1) {
+              ctx.lineTo(curr.x, curr.y)
+            } else {
+              const controlX = (prev.x + curr.x) / 2
+              const controlY = (prev.y + curr.y) / 2
+              ctx.quadraticCurveTo(controlX, controlY, curr.x, curr.y)
+            }
           }
-        })
+        }
         
         ctx.stroke()
       }

@@ -52,9 +52,10 @@
     font-size: 40px;
   }
 
-  .grading-scale-modal {
-    min-width: 100%;
-    max-width: 100%;
+  .modal-content.grading-scale-modal {
+    min-width: 100% !important;
+    max-width: 100% !important;
+    width: 100% !important;
   }
 
   .grading-scale-content {
@@ -1096,15 +1097,16 @@
   color: #fff;
 }
 
-.grading-scale-modal {
-  min-width: 1400px;
+.modal-content.grading-scale-modal {
+  max-width: 700px;
+  width: 100%;
   max-height: 98vh;
-  overflow-y: visible;
+  overflow-y: auto;
 }
 
 .grading-scale-content {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: var(--spacing-xl);
 }
 
@@ -1116,7 +1118,7 @@
 }
 
 .grading-scale-section-altitude {
-  margin-left: var(--spacing-3xl);
+  margin-left: 0;
 }
 
 .grading-scale-note {
@@ -1217,8 +1219,10 @@
     overflow-y: auto;
   }
 
-  .grading-scale-modal {
-    min-width: auto;
+  .modal-content.grading-scale-modal {
+    min-width: auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
     max-height: 90vh;
   }
 
@@ -1289,7 +1293,10 @@
     padding: var(--spacing-xs);
   }
 
-  .grading-scale-modal {
+  .modal-content.grading-scale-modal {
     padding: 0;
+    min-width: auto !important;
+    max-width: 100% !important;
+    width: 100% !important;
   }
 }

@@ -969,7 +969,6 @@ export default function SteepTurn({ user }) {
         <div className="steep-turn-grid">
           <div className="left-col">
             <div className="card">
-              <h2>Control</h2>
               <div className={`status-badge ${state}`}>
                 ● {state === 'disconnected' ? 'Disconnected' : 
                    state === 'ready' ? 'Ready' : 

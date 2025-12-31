@@ -19,6 +19,7 @@ import FlightPath3D from './FlightPath3D'
 import { gradePathFollowing } from '../utils/pathFollowingGrading'
 import { fetchPathFollowingFeedback } from '../lib/aiFeedback'
 import { getGradeColorClass } from '../utils/steepTurnGrading'
+import { SKILL_LEVELS } from '../utils/autoStartTolerances'
 import './Landing.css'
 
 // Helper function to convert heading to cardinal direction
@@ -77,6 +78,20 @@ function getAirportName(airportCode) {
   return AIRPORT_NAMES[airportCode.toUpperCase()] || null
 }
 
+// Get runway display name
+function getRunwayDisplayName(runwayId, customRunways) {
+  if (runwayId === '27') {
+    return 'KJKA 27 (Jack Edwards)'
+  }
+
+  const customRunway = customRunways.find(r => r.id === runwayId)
+  if (!customRunway) return runwayId
+
+  const airportCode = extractAirportCode(customRunway.name)
+  const airportName = airportCode ? getAirportName(airportCode) : null
+  return airportName ? `${customRunway.name} (${airportName})` : customRunway.name
+}
+
 const saveInProgress = new Set()
 
 async function saveLandingToDatabase(userId, landingData) {
@@ -127,6 +142,7 @@ export default function Landing({ user }) {
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [pathDropdownOpen, setPathDropdownOpen] = useState(false)
   const [showCalibration, setShowCalibration] = useState(false)
+  const [showGradingScale, setShowGradingScale] = useState(false)
   const [flightPath, setFlightPath] = useState([])
   const [savedLandingPaths, setSavedLandingPaths] = useState([])
   const [selectedLandingPath, setSelectedLandingPath] = useState(null)
@@ -140,7 +156,7 @@ export default function Landing({ user }) {
   const [pathFollowingResult, setPathFollowingResult] = useState(null)
   const pathStartReached = useRef(false) // Track if we've reached the start of the path
   const pathFollowingCompleting = useRef(false) // Prevent multiple completion calls
-  const [pathFollowingSkillLevel, setPathFollowingSkillLevel] = useState('pro') // Skill level: beginner, amateur, pro
+  const [pathFollowingSkillLevel, setPathFollowingSkillLevel] = useState('acs') // Skill level: beginner, novice, acs
   const [currentPathFollowingId, setCurrentPathFollowingId] = useState(null) // Database ID for AI feedback
   const [aiFeedback, setAiFeedback] = useState(null)
   const [aiFocus, setAiFocus] = useState(null)
@@ -451,18 +467,23 @@ export default function Landing({ user }) {
 
     // Track deviations from reference path if path following is active
     if (pathFollowingTracking && pathFollowingTracking.referencePath && isAirborne && isMoving) {
-      // Check if we've reached the start of the path
+      // Check if we've reached the path (anywhere on the path, not just the start)
       if (!pathStartReached.current) {
-        const pathStart = pathFollowingTracking.referencePath[0]
-        const distToStart = calculateDistance(
-          data.lat, data.lon,
-          pathStart.lat, pathStart.lon
-        )
+        let minDistToPath = Infinity
         
-        // Consider start reached if within 0.3 NM of the first point
-        if (distToStart <= 0.3) {
+        // Check distance to all points on the path
+        pathFollowingTracking.referencePath.forEach((point) => {
+          const distToPoint = calculateDistance(
+            data.lat, data.lon,
+            point.lat, point.lon
+          )
+          minDistToPath = Math.min(minDistToPath, distToPoint)
+        })
+        
+        // Consider path reached if within 0.3 NM of any point on the path
+        if (minDistToPath <= 0.3) {
           pathStartReached.current = true
-          console.log('Path start reached! Beginning deviation tracking.')
+          console.log('Path reached! Beginning deviation tracking.')
         }
       }
       
@@ -572,8 +593,25 @@ export default function Landing({ user }) {
     if (selectedLandingPath) {
       const referencePath = savedLandingPaths.find(p => p.id === selectedLandingPath)
       if (referencePath && referencePath.path_data) {
-        pathStartReached.current = false // Reset start reached flag
         pathFollowingCompleting.current = false // Reset completion flag
+        
+        // Check if user is already on/near the path when starting tracking
+        let isOnPath = false
+        if (data && data.lat && data.lon) {
+          referencePath.path_data.forEach((point) => {
+            const distToPoint = calculateDistance(
+              data.lat, data.lon,
+              point.lat, point.lon
+            )
+            // If within 0.3 NM of any point on the path, consider them on the path
+            if (distToPoint <= 0.3) {
+              isOnPath = true
+            }
+          })
+        }
+        
+        pathStartReached.current = isOnPath // Auto-start if already on path
+        
         setPathFollowingTracking({
           referencePath: referencePath.path_data,
           pathName: referencePath.path_name,
@@ -590,7 +628,12 @@ export default function Landing({ user }) {
           samples: [],
           deviations: []
         })
-        console.log('Started path following tracking with reference:', referencePath.path_name, '- Waiting for path start...')
+        
+        if (isOnPath) {
+          console.log('Started path following tracking with reference:', referencePath.path_name, '- Already on path, beginning deviation tracking immediately!')
+        } else {
+          console.log('Started path following tracking with reference:', referencePath.path_name, '- Waiting for path start...')
+        }
       }
     } else {
       setPathFollowingTracking(null)
@@ -752,7 +795,10 @@ export default function Landing({ user }) {
         violations,
         touchdown: touchdownData.current,
         flightPath,
-        runway: selectedRunway,
+        runway: {
+          id: selectedRunway,
+          name: getRunwayDisplayName(selectedRunway, customRunways)
+        },
         vref,
         timestamp: new Date().toISOString()
       }
@@ -822,7 +868,10 @@ export default function Landing({ user }) {
       grade: gradeData.finalGrade,
       gradeDetails: gradeData,
       pathName: pathFollowingTracking.pathName,
-      runway: selectedRunway,
+      runway: {
+        id: selectedRunway,
+        name: getRunwayDisplayName(selectedRunway, customRunways)
+      },
       maxDeviations: {
         altitude: pathFollowingTracking.maxAltDev,
         lateral: pathFollowingTracking.maxLateralDev,
@@ -1091,6 +1140,186 @@ export default function Landing({ user }) {
     )
   }
 
+  if (showGradingScale) {
+    return (
+      <div className="modal-overlay" onClick={() => setShowGradingScale(false)}>
+        <div className="modal-content grading-scale-modal" onClick={(e) => e.stopPropagation()}>
+          <h2>Path Following Grading Scale - {pathFollowingSkillLevel === 'acs' ? 'ACS' : pathFollowingSkillLevel.charAt(0).toUpperCase() + pathFollowingSkillLevel.slice(1)}</h2>
+          {(() => {
+            // Import the thresholds function
+            const getThresholds = (skillLevel) => {
+              const normalized = (skillLevel || 'acs').toLowerCase()
+              const thresholds = {
+                acs: {
+                  altitude: { Aplus: 20, A: 40, Aminus: 60, Bplus: 80, B: 100, Bminus: 120, Cplus: 150, C: 180, Cminus: 220, Dplus: 250, D: 300, Dminus: 350 },
+                  lateral: { Aplus: 0.05, A: 0.1, Aminus: 0.15, Bplus: 0.2, B: 0.25, Bminus: 0.3, Cplus: 0.4, C: 0.5, Cminus: 0.6, Dplus: 0.7, D: 0.8, Dminus: 0.9 },
+                  speed: { Aplus: 2, A: 4, Aminus: 6, Bplus: 8, B: 10, Bminus: 12, Cplus: 15, C: 18, Cminus: 22, Dplus: 25, D: 30, Dminus: 35 },
+                  bank: { Aplus: 1, A: 2, Aminus: 3, Bplus: 4, B: 5, Bminus: 6, Cplus: 8, C: 10, Cminus: 12, Dplus: 15, D: 18, Dminus: 22 },
+                  pitch: { Aplus: 0.5, A: 1, Aminus: 1.5, Bplus: 2, B: 2.5, Bminus: 3, Cplus: 4, C: 5, Cminus: 6, Dplus: 7, D: 8, Dminus: 10 }
+                },
+                novice: {
+                  altitude: { Aplus: 40, A: 80, Aminus: 120, Bplus: 160, B: 200, Bminus: 240, Cplus: 280, C: 320, Cminus: 360, Dplus: 400, D: 450, Dminus: 500 },
+                  lateral: { Aplus: 0.1, A: 0.2, Aminus: 0.3, Bplus: 0.4, B: 0.5, Bminus: 0.6, Cplus: 0.7, C: 0.8, Cminus: 1.0, Dplus: 1.2, D: 1.4, Dminus: 1.6 },
+                  speed: { Aplus: 4, A: 8, Aminus: 12, Bplus: 16, B: 20, Bminus: 24, Cplus: 28, C: 32, Cminus: 36, Dplus: 40, D: 45, Dminus: 50 },
+                  bank: { Aplus: 2, A: 4, Aminus: 6, Bplus: 8, B: 10, Bminus: 12, Cplus: 15, C: 18, Cminus: 22, Dplus: 25, D: 30, Dminus: 35 },
+                  pitch: { Aplus: 1, A: 2, Aminus: 3, Bplus: 4, B: 5, Bminus: 6, Cplus: 8, C: 10, Cminus: 12, Dplus: 15, D: 18, Dminus: 22 }
+                },
+                beginner: {
+                  altitude: { Aplus: 150, A: 250, Aminus: 350, Bplus: 450, B: 550, Bminus: 650, Cplus: 750, C: 850, Cminus: 1000, Dplus: 1200, D: 1500, Dminus: 1800 },
+                  lateral: { Aplus: 0.3, A: 0.5, Aminus: 0.7, Bplus: 0.9, B: 1.2, Bminus: 1.5, Cplus: 1.8, C: 2.2, Cminus: 2.6, Dplus: 3.0, D: 3.5, Dminus: 4.0 },
+                  speed: { Aplus: 12, A: 18, Aminus: 24, Bplus: 30, B: 36, Bminus: 42, Cplus: 48, C: 54, Cminus: 60, Dplus: 70, D: 80, Dminus: 90 },
+                  bank: { Aplus: 6, A: 10, Aminus: 14, Bplus: 18, B: 22, Bminus: 26, Cplus: 30, C: 35, Cminus: 40, Dplus: 45, D: 50, Dminus: 55 },
+                  pitch: { Aplus: 3, A: 5, Aminus: 7, Bplus: 9, B: 12, Bminus: 15, Cplus: 18, C: 22, Cminus: 26, Dplus: 30, D: 35, Dminus: 40 }
+                }
+              }
+              if (normalized === 'acs') return thresholds.acs
+              if (normalized === 'novice') return thresholds.novice
+              if (normalized === 'beginner') return thresholds.beginner
+              return thresholds.acs
+            }
+
+            const thresholds = getThresholds(pathFollowingSkillLevel)
+            const grades = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-']
+
+            return (
+              <div className="grading-scale-content">
+                <div className="grading-scale-section">
+                  <h3>Altitude</h3>
+                  <p className="grading-scale-note">Maximum deviation from reference path altitude</p>
+                  <table className="grading-table">
+                    <thead>
+                      <tr>
+                        <th>Grade</th>
+                        <th>Max Dev (ft)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grades.map(grade => {
+                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
+                        return (
+                          <tr key={grade}>
+                            <td className="grade-cell">{grade}</td>
+                            <td>{thresholds.altitude[gradeKey]} ft</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grading-scale-section">
+                  <h3>Lateral</h3>
+                  <p className="grading-scale-note">Maximum lateral deviation from reference path</p>
+                  <table className="grading-table">
+                    <thead>
+                      <tr>
+                        <th>Grade</th>
+                        <th>Max Dev (NM)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grades.map(grade => {
+                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
+                        return (
+                          <tr key={grade}>
+                            <td className="grade-cell">{grade}</td>
+                            <td>{thresholds.lateral[gradeKey]}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grading-scale-section">
+                  <h3>Speed</h3>
+                  <p className="grading-scale-note">Maximum deviation from reference path airspeed</p>
+                  <table className="grading-table">
+                    <thead>
+                      <tr>
+                        <th>Grade</th>
+                        <th>Max Dev (kt)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grades.map(grade => {
+                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
+                        return (
+                          <tr key={grade}>
+                            <td className="grade-cell">{grade}</td>
+                            <td>{thresholds.speed[gradeKey]}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grading-scale-section">
+                  <h3>Bank Angle</h3>
+                  <p className="grading-scale-note">Maximum deviation from reference path bank angle</p>
+                  <table className="grading-table">
+                    <thead>
+                      <tr>
+                        <th>Grade</th>
+                        <th>Max Dev (°)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grades.map(grade => {
+                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
+                        return (
+                          <tr key={grade}>
+                            <td className="grade-cell">{grade}</td>
+                            <td>{thresholds.bank[gradeKey]}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grading-scale-section">
+                  <h3>Pitch Angle</h3>
+                  <p className="grading-scale-note">Maximum deviation from reference path pitch angle</p>
+                  <table className="grading-table">
+                    <thead>
+                      <tr>
+                        <th>Grade</th>
+                        <th>Max Dev (°)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {grades.map(grade => {
+                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
+                        return (
+                          <tr key={grade}>
+                            <td className="grade-cell">{grade}</td>
+                            <td>{thresholds.pitch[gradeKey]}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grading-scale-note grading-scale-final-note">
+                  <strong>Note:</strong> Final grade is the worst grade across all categories. Busted tolerances (altitude ±100ft, lateral ±0.2NM, speed ±10kt, bank ±5°, pitch ±3°) result in grade penalties.
+                </div>
+              </div>
+            )
+          })()}
+
+          <div className="modal-actions">
+            <button className="btn-secondary" onClick={() => setShowGradingScale(false)}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="landing-page">
       <div className="landing-container">
@@ -1106,7 +1335,6 @@ export default function Landing({ user }) {
           {/* Left Column: Controls and Configuration */}
           <div className="left-col">
             <div className={`card ${dropdownOpen ? 'dropdown-active' : ''}`}>
-              <h2>Control</h2>
               <div className={`status-badge ${state}`}>
                 ● {state === 'disconnected' ? 'Disconnected' : 
                    state === 'ready' ? 'Ready' : 
@@ -1134,7 +1362,8 @@ export default function Landing({ user }) {
                 </div>
               )}
 
-              <div className="config-section">
+              {!tracking && (
+                <div className="config-section">
                 <label>
                   Aircraft Vref (kt)
                   <input
@@ -1273,21 +1502,32 @@ export default function Landing({ user }) {
                   </div>
                 </label>
 
-                {selectedLandingPath && (
-                  <label>
-                    Skill Level
-                    <select
-                      value={pathFollowingSkillLevel}
-                      onChange={(e) => setPathFollowingSkillLevel(e.target.value)}
-                      disabled={tracking}
-                      style={{ width: '100%', padding: '8px', marginTop: '4px' }}
-                    >
-                      <option value="beginner">Beginner</option>
-                      <option value="amateur">Amateur</option>
-                      <option value="pro">Pro</option>
-                    </select>
-                  </label>
-                )}
+                <label style={{ marginBottom: '8px', display: 'block' }}>
+                  Skill Level
+                </label>
+                <div className="skill-level-selector" style={{ marginTop: '4px' }}>
+                  <button
+                    className={`skill-level-btn ${pathFollowingSkillLevel === SKILL_LEVELS.BEGINNER ? 'active' : ''}`}
+                    onClick={() => setPathFollowingSkillLevel(SKILL_LEVELS.BEGINNER)}
+                    disabled={tracking}
+                  >
+                    Beginner
+                  </button>
+                  <button
+                    className={`skill-level-btn ${pathFollowingSkillLevel === SKILL_LEVELS.NOVICE ? 'active' : ''}`}
+                    onClick={() => setPathFollowingSkillLevel(SKILL_LEVELS.NOVICE)}
+                    disabled={tracking}
+                  >
+                    Novice
+                  </button>
+                  <button
+                    className={`skill-level-btn ${pathFollowingSkillLevel === SKILL_LEVELS.ACS ? 'active' : ''}`}
+                    onClick={() => setPathFollowingSkillLevel(SKILL_LEVELS.ACS)}
+                    disabled={tracking}
+                  >
+                    ACS
+                  </button>
+                </div>
 
                 <div className={`record-path-section ${recordingPath ? 'recording' : ''}`}>
                   <div className="record-path-header">
@@ -1297,7 +1537,7 @@ export default function Landing({ user }) {
                     )}
                   </div>
                   <p className="record-path-description">
-                    Record a flight path independently of landing tracking. The path will be saved for the selected runway.
+                    Record a landing path for the selected runway. This becomes a reference track students can follow and practice.
                   </p>
                   {!recordingPath ? (
                     <button
@@ -1317,17 +1557,25 @@ export default function Landing({ user }) {
                   )}
                 </div>
 
-                <button
-                  className="btn-calibrate"
-                  onClick={() => setShowCalibration(true)}
-                  disabled={tracking}
-                >
-                  + Calibrate New Runway
-                </button>
+                <div className="calibrate-runway-section">
+                  <div className="calibrate-runway-header">
+                    <span className="calibrate-runway-title">Calibrate Runway</span>
+                  </div>
+                  <p className="calibrate-runway-description">
+                  Improve runway accuracy by driving straight down the runway. This sets precise runway endpoints for reliable landing tracking.
+                  </p>
+                  <button
+                    className="btn-calibrate"
+                    onClick={() => setShowCalibration(true)}
+                    disabled={tracking}
+                  >
+                    + Start Calibrating Runway
+                  </button>
+                </div>
               </div>
+              )}
             </div>
 
-            {/* Live Telemetry */}
             <div className="card">
               <h2>Live Data</h2>
               <div className="live-values">
@@ -1719,6 +1967,12 @@ export default function Landing({ user }) {
                     detect which phase you're in and check compliance with standards in real-time.
                   </p>
                 </div>
+                <button
+                  className="grading-scale-button"
+                  onClick={() => setShowGradingScale(true)}
+                >
+                  View Grading Scale
+                </button>
               </div>
             )}
           </div>

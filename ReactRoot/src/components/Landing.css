@@ -13,7 +13,7 @@
 .landing-container h1 {
   font-size: clamp(1.5rem, 2.5rem, var(--font-size-h1));
   margin-bottom: var(--gap-sm);
-  background: linear-gradient(135deg, #4a9eff 0%, #00d4ff 100%);
+  background: white;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -49,6 +49,23 @@
     grid-template-columns: repeat(3, 1fr);
   }
 
+  .skill-level-selector {
+    flex-direction: row;
+  }
+
+  .skill-level-btn {
+    width: 100%;
+  }
+
+  .grading-scale-modal {
+    min-width: 100%;
+    max-width: 100%;
+  }
+
+  .grading-scale-content {
+    grid-template-columns: 1fr;
+  }
+
   .gate-details {
     flex-direction: column;
     gap: var(--spacing-xs);
@@ -81,9 +98,9 @@
 }
 
 .card {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--card);
   backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--border);
   border-radius: var(--border-radius-lg);
   padding: var(--spacing-xl);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
@@ -437,6 +454,33 @@
 }
 
 .record-path-description {
+  font-size: 0.75rem;
+  color: #aaa;
+  margin-bottom: 8px;
+  line-height: 1.4;
+}
+
+.calibrate-runway-section {
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+}
+
+.calibrate-runway-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.calibrate-runway-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #ddd;
+}
+
+.calibrate-runway-description {
   font-size: 0.75rem;
   color: #aaa;
   margin-bottom: 8px;
@@ -856,5 +900,149 @@
 
 .modal-content .btn-secondary:hover {
   background: rgba(255, 255, 255, 0.15);
+}
+
+.skill-level-selector {
+  display: flex;
+  gap: 8px;
+}
+
+.skill-level-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.skill-level-btn:hover:not(:disabled) {
+  border-color: var(--blue);
+  color: var(--text);
+}
+
+.skill-level-btn.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+}
+
+.skill-level-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.grading-scale-button {
+  width: 100%;
+  padding: var(--spacing-md) var(--spacing-xl);
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  border: 1px solid var(--border);
+  border-radius: var(--border-radius-md);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: var(--spacing-md);
+}
+
+.grading-scale-button:hover {
+  background: rgba(163, 113, 247, 0.2);
+  border-color: rgba(163, 113, 247, 0.5);
+  transform: translateY(-1px);
+}
+
+.grading-scale-modal {
+  min-width: 1400px;
+  max-height: 98vh;
+  overflow-y: visible;
+}
+
+.grading-scale-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: var(--spacing-xl);
+}
+
+.grading-scale-section h3 {
+  margin: 0 0 var(--spacing-xs) 0;
+  font-size: var(--font-size-base);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.grading-scale-note {
+  margin: 0 0 var(--gap-sm) 0;
+  font-size: var(--font-size-tiny);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.grading-scale-final-note {
+  margin-top: var(--spacing-lg);
+  text-align: center;
+  padding: var(--spacing-md);
+  background: rgba(163, 113, 247, 0.1);
+  border-radius: var(--border-radius-md);
+  border: 1px solid rgba(163, 113, 247, 0.2);
+}
+
+.grading-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: var(--border-radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.grading-table thead {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.grading-table th {
+  padding: var(--gap-sm) var(--spacing-sm);
+  text-align: left;
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.grading-table td {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  font-size: var(--font-size-base);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.grading-table td:last-child,
+.grading-table th:last-child {
+  padding-right: var(--spacing-sm);
+}
+
+.grading-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.grading-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.grade-cell {
+  font-weight: 700;
+  color: var(--accent);
+  font-family: 'Monaco', 'Consolas', monospace;
+}
+
+.modal-actions {
+  margin-top: var(--spacing-xl);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
 }
 

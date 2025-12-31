@@ -34,43 +34,41 @@ export default function AutoStart({ enabled, skillLevel, onToggle, onSkillLevelC
         </label>
       </div>
       
+      <div className="skill-level-selector">
+        <button
+          className={`skill-level-btn ${skillLevel === SKILL_LEVELS.BEGINNER ? 'active' : ''}`}
+          onClick={() => onSkillLevelChange(SKILL_LEVELS.BEGINNER)}
+        >
+          Beginner
+        </button>
+        <button
+          className={`skill-level-btn ${skillLevel === SKILL_LEVELS.NOVICE ? 'active' : ''}`}
+          onClick={() => onSkillLevelChange(SKILL_LEVELS.NOVICE)}
+        >
+          Novice
+        </button>
+        <button
+          className={`skill-level-btn ${skillLevel === SKILL_LEVELS.ACS ? 'active' : ''}`}
+          onClick={() => onSkillLevelChange(SKILL_LEVELS.ACS)}
+        >
+          ACS
+        </button>
+      </div>
+      
       {enabled && (
-        <>
-          <div className="skill-level-selector">
-            <button
-              className={`skill-level-btn ${skillLevel === SKILL_LEVELS.BEGINNER ? 'active' : ''}`}
-              onClick={() => onSkillLevelChange(SKILL_LEVELS.BEGINNER)}
-            >
-              Beginner
-            </button>
-            <button
-              className={`skill-level-btn ${skillLevel === SKILL_LEVELS.NOVICE ? 'active' : ''}`}
-              onClick={() => onSkillLevelChange(SKILL_LEVELS.NOVICE)}
-            >
-              Novice
-            </button>
-            <button
-              className={`skill-level-btn ${skillLevel === SKILL_LEVELS.ACS ? 'active' : ''}`}
-              onClick={() => onSkillLevelChange(SKILL_LEVELS.ACS)}
-            >
-              ACS
-            </button>
+        <div className="tolerance-info">
+          <div className="tolerance-header">
+            <span className="tolerance-title">Auto-Start Tolerances</span>
           </div>
-          
-          <div className="tolerance-info">
-            <div className="tolerance-header">
-              <span className="tolerance-title">Auto-Start Tolerances</span>
-            </div>
-            <div className="tolerance-items">
-              {getToleranceItems(skillLevel).map((item, index) => (
-                <div key={index} className="tolerance-item">
-                  <span className="tolerance-item-label">{item.label}</span>
-                  <span className="tolerance-item-value">{item.value}</span>
-                </div>
-              ))}
-            </div>
+          <div className="tolerance-items">
+            {getToleranceItems(skillLevel).map((item, index) => (
+              <div key={index} className="tolerance-item">
+                <span className="tolerance-item-label">{item.label}</span>
+                <span className="tolerance-item-value">{item.value}</span>
+              </div>
+            ))}
           </div>
-        </>
+        </div>
       )}
       
       {enabled && status && (

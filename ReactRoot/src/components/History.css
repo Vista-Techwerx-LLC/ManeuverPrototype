@@ -876,3 +876,32 @@
   flex-shrink: 0;
 }
 
+.phases-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.phases-list li {
+  padding: var(--spacing-sm) 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.phases-list li:last-child {
+  border-bottom: none;
+}
+
+.violations-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.violations-list li {
+  padding: var(--spacing-xs) 0;
+  color: var(--red);
+}
+

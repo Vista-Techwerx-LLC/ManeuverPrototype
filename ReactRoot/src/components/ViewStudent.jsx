@@ -6,6 +6,111 @@ import { getSteepTurnPassTolerances, SKILL_LEVELS } from '../utils/autoStartTole
 import FlightPath3D from './FlightPath3D'
 import './ViewStudent.css'
 
+async function loadCustomRunways(user) {
+  if (!user) return []
+
+  try {
+    // Get accepted connections (both as student and instructor)
+    const { data: relationships, error: relError } = await supabase
+      .from('instructor_relationships')
+      .select('student_id, instructor_id, status')
+      .or(`and(student_id.eq.${user.id},status.eq.accepted),and(instructor_id.eq.${user.id},status.eq.accepted)`)
+
+    // Collect all connected user IDs (including own)
+    const connectedUserIds = new Set([user.id])
+    relationships?.forEach(rel => {
+      if (rel.student_id === user.id) {
+        connectedUserIds.add(rel.instructor_id)
+      } else if (rel.instructor_id === user.id) {
+        connectedUserIds.add(rel.student_id)
+      }
+    })
+
+    const { data: dbRunways, error: dbError } = await supabase
+      .from('custom_runways')
+      .select('user_id, runway_data, runway_name, created_at')
+      .in('user_id', Array.from(connectedUserIds))
+      .order('created_at', { ascending: false })
+
+    if (dbError) {
+      console.error('Error loading runways from database:', dbError)
+      return []
+    }
+
+    // Convert database runways to format expected by the app
+    return dbRunways?.map(r => r.runway_data) || []
+  } catch (error) {
+    console.error('Error loading custom runways:', error)
+    return []
+  }
+}
+
+function getDisplayManeuverType(maneuverType) {
+  if (maneuverType === 'path_following') {
+    return 'LANDING'
+  }
+  return maneuverType.replace('_', ' ').toUpperCase()
+}
+
+function getRunwayDisplayName(runwayData, customRunways = []) {
+  if (typeof runwayData === 'string') {
+    // Handle old format - just the ID string
+    if (runwayData === '27') {
+      return 'KJKA 27 (Jack Edwards)'
+    }
+    if (runwayData.startsWith('custom_')) {
+      // Look up the runway name from custom runways
+      const customRunway = customRunways.find(r => r.id === runwayData)
+      if (customRunway) {
+        const airportCode = customRunway.name.match(/^([A-Z]{3,4})\s/)?.[1]
+        const airportName = airportCode ? {
+          'KJKA': 'Jack Edwards',
+          'KORD': 'O\'Hare International',
+          'KLAX': 'Los Angeles International',
+          'KJFK': 'John F. Kennedy International',
+          'KATL': 'Hartsfield-Jackson Atlanta International',
+          'KDFW': 'Dallas/Fort Worth International',
+          'KDEN': 'Denver International',
+          'KSFO': 'San Francisco International',
+          'KSEA': 'Seattle-Tacoma International',
+          'KMIA': 'Miami International',
+          'KCLT': 'Charlotte Douglas International',
+          'KPHX': 'Phoenix Sky Harbor International',
+          'KLAS': 'McCarran International',
+          'KMSP': 'Minneapolis-Saint Paul International',
+          'KDTW': 'Detroit Metropolitan',
+          'KBOS': 'Logan International',
+          'KIAD': 'Washington Dulles International',
+          'KIAH': 'George Bush Intercontinental',
+          'KMCO': 'Orlando International',
+          'KEWR': 'Newark Liberty International',
+          'KPHL': 'Philadelphia International',
+          'KBWI': 'Baltimore/Washington International',
+          'KSLC': 'Salt Lake City International',
+          'KSAN': 'San Diego International',
+          'KPDX': 'Portland International',
+          'KMCI': 'Kansas City International',
+          'KAUS': 'Austin-Bergstrom International',
+          'KSTL': 'St. Louis Lambert International',
+          'KBNA': 'Nashville International',
+          'KRDU': 'Raleigh-Durham International',
+        }[airportCode] : null
+        return airportName ? `${customRunway.name} (${airportName})` : customRunway.name
+      }
+      return 'Custom Runway'
+    }
+    return runwayData
+  }
+
+  // Handle new format - object with name property
+  if (runwayData?.name) {
+    return runwayData.name
+  }
+
+  // Fallback
+  return runwayData?.id || 'Unknown'
+}
+
 export default function ViewStudent({ user }) {
   const { studentId } = useParams()
   const navigate = useNavigate()
@@ -13,10 +118,12 @@ export default function ViewStudent({ user }) {
   const [maneuvers, setManeuvers] = useState([])
   const [loading, setLoading] = useState(true)
   const [hasAccess, setHasAccess] = useState(false)
+  const [customRunways, setCustomRunways] = useState([])
 
   useEffect(() => {
     if (studentId && user.id) {
       checkAccess()
+      loadCustomRunways(user).then(setCustomRunways)
     }
   }, [user.id, studentId])
 
@@ -369,7 +476,7 @@ export default function ViewStudent({ user }) {
           ) : (
             <div className="maneuver-list">
               {maneuvers.slice(0, 10).map(maneuver => (
-                <ManeuverCard key={maneuver.id} maneuver={maneuver} />
+                <ManeuverCard key={maneuver.id} maneuver={maneuver} customRunways={customRunways} />
               ))}
             </div>
           )}
@@ -379,12 +486,15 @@ export default function ViewStudent({ user }) {
   )
 }
 
-function ManeuverCard({ maneuver }) {
+function ManeuverCard({ maneuver, customRunways }) {
   const [expanded, setExpanded] = useState(false)
   const details = maneuver.result_data
   const isPassed = maneuver.grade === 'PASS'
   const date = new Date(maneuver.created_at)
   const skillLevel = maneuver.skill_level
+  const isSteepTurn = maneuver.maneuver_type === 'steep_turn'
+  const isLanding = maneuver.maneuver_type === 'landing'
+  const isPathFollowing = maneuver.maneuver_type === 'path_following'
 
   const formatSkillLevel = (level) => {
     if (!level) return null
@@ -396,7 +506,7 @@ function ManeuverCard({ maneuver }) {
       <div className="maneuver-header" onClick={() => setExpanded(!expanded)}>
         <div className="maneuver-info">
           <div className="maneuver-type">
-            {maneuver.maneuver_type.replace('_', ' ').toUpperCase()}
+            {getDisplayManeuverType(maneuver.maneuver_type)}
             {skillLevel && (
               <span className="skill-level-badge">
                 {formatSkillLevel(skillLevel)}
@@ -416,104 +526,253 @@ function ManeuverCard({ maneuver }) {
 
       {expanded && details && (
         <div className="maneuver-details">
-          <div className="details-section">
-            <h3>Entry Parameters</h3>
-            <div className="details-grid">
-              <div>
-                <span className="label">Heading:</span>
-                <span className="value">{Math.round(details.entry?.heading || 0)}°</span>
+          {isSteepTurn && (
+            <>
+              <div className="details-section">
+                <h3>Entry Parameters</h3>
+                <div className="details-grid">
+                  <div>
+                    <span className="label">Heading:</span>
+                    <span className="value">{Math.round(details.entry?.heading || 0)}°</span>
+                  </div>
+                  <div>
+                    <span className="label">Altitude:</span>
+                    <span className="value">{Math.round(details.entry?.altitude || 0)} ft</span>
+                  </div>
+                  <div>
+                    <span className="label">Airspeed:</span>
+                    <span className="value">{Math.round(details.entry?.airspeed || 0)} kt</span>
+                  </div>
+                </div>
               </div>
-              <div>
-                <span className="label">Altitude:</span>
-                <span className="value">{Math.round(details.entry?.altitude || 0)} ft</span>
-              </div>
-              <div>
-                <span className="label">Airspeed:</span>
-                <span className="value">{Math.round(details.entry?.airspeed || 0)} kt</span>
-              </div>
-            </div>
-          </div>
 
-          <div className="details-section">
-            <h3>Maximum Deviations</h3>
-            <div className="deviation-grid">
-              {(() => {
-                const maneuverSkillLevel = skillLevel || details.autoStart?.skillLevel || SKILL_LEVELS.ACS
-                const tolerances = getSteepTurnPassTolerances(maneuverSkillLevel)
-                const maxBankTolerance = Math.max(tolerances.bank.max - 45, 45 - tolerances.bank.min)
-                
-                return (
-                  <>
-                    <div className={Math.abs(details.deviations?.maxAltitude || 0) <= tolerances.altitude ? 'pass' : 'fail'}>
+              <div className="details-section">
+                <h3>Maximum Deviations</h3>
+                <div className="deviation-grid">
+                  {(() => {
+                    const maneuverSkillLevel = skillLevel || details.autoStart?.skillLevel || SKILL_LEVELS.ACS
+                    const tolerances = getSteepTurnPassTolerances(maneuverSkillLevel)
+                    const maxBankTolerance = Math.max(tolerances.bank.max - 45, 45 - tolerances.bank.min)
+                    
+                    return (
+                      <>
+                        <div className={Math.abs(details.deviations?.maxAltitude || 0) <= tolerances.altitude ? 'pass' : 'fail'}>
+                          <span className="label">Altitude:</span>
+                          <span className="value">
+                            {(details.deviations?.maxAltitude >= 0 ? '+' : '') + 
+                             Math.round(details.deviations?.maxAltitude || 0)} ft
+                          </span>
+                        </div>
+                        <div className={Math.abs(details.deviations?.maxAirspeed || 0) <= tolerances.airspeed ? 'pass' : 'fail'}>
+                          <span className="label">Airspeed:</span>
+                          <span className="value">
+                            {(details.deviations?.maxAirspeed >= 0 ? '+' : '') + 
+                             Math.round(details.deviations?.maxAirspeed || 0)} kt
+                          </span>
+                        </div>
+                        <div className={Math.abs(details.deviations?.maxBank || 0) <= maxBankTolerance ? 'pass' : 'fail'}>
+                          <span className="label">Bank:</span>
+                          <span className="value">
+                            {(details.deviations?.maxBank >= 0 ? '+' : '') + 
+                             Math.round(details.deviations?.maxBank || 0)}° from 45°
+                          </span>
+                        </div>
+                        <div className={(details.deviations?.rolloutHeadingError || 0) <= tolerances.rolloutHeading ? 'pass' : 'fail'}>
+                          <span className="label">Rollout:</span>
+                          <span className="value">{Math.round(details.deviations?.rolloutHeadingError || 0)}°</span>
+                        </div>
+                      </>
+                    )
+                  })()}
+                </div>
+              </div>
+
+              {details.averages && (
+                <div className="details-section">
+                  <h3>Averages</h3>
+                  <div className="details-grid">
+                    <div>
+                      <span className="label">Bank:</span>
+                      <span className="value">{Math.round(details.averages?.bank || 0)}°</span>
+                    </div>
+                    <div>
                       <span className="label">Altitude:</span>
                       <span className="value">
-                        {(details.deviations?.maxAltitude >= 0 ? '+' : '') + 
-                         Math.round(details.deviations?.maxAltitude || 0)} ft
+                        {Math.round(details.averages?.altitude || 0)} ft
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+                          ({(details.averages?.altitudeDeviation >= 0 ? '+' : '') + 
+                           Math.round(details.averages?.altitudeDeviation || 0)})
+                        </span>
                       </span>
                     </div>
-                    <div className={Math.abs(details.deviations?.maxAirspeed || 0) <= tolerances.airspeed ? 'pass' : 'fail'}>
+                    <div>
                       <span className="label">Airspeed:</span>
                       <span className="value">
-                        {(details.deviations?.maxAirspeed >= 0 ? '+' : '') + 
-                         Math.round(details.deviations?.maxAirspeed || 0)} kt
+                        {Math.round(details.averages?.airspeed || 0)} kt
+                        <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+                          ({(details.averages?.airspeedDeviation >= 0 ? '+' : '') + 
+                           Math.round(details.averages?.airspeedDeviation || 0)})
+                        </span>
                       </span>
                     </div>
-                    <div className={Math.abs(details.deviations?.maxBank || 0) <= maxBankTolerance ? 'pass' : 'fail'}>
-                      <span className="label">Bank:</span>
-                      <span className="value">
-                        {(details.deviations?.maxBank >= 0 ? '+' : '') + 
-                         Math.round(details.deviations?.maxBank || 0)}° from 45°
-                      </span>
-                    </div>
-                    <div className={(details.deviations?.rolloutHeadingError || 0) <= tolerances.rolloutHeading ? 'pass' : 'fail'}>
-                      <span className="label">Rollout:</span>
-                      <span className="value">{Math.round(details.deviations?.rolloutHeadingError || 0)}°</span>
-                    </div>
-                  </>
-                )
-              })()}
-            </div>
-          </div>
+                  </div>
+                </div>
+              )}
 
-          {details.averages && (
-            <div className="details-section">
-              <h3>Averages</h3>
-              <div className="details-grid">
-                <div>
-                  <span className="label">Bank:</span>
-                  <span className="value">{Math.round(details.averages?.bank || 0)}°</span>
+              {details.flightPath && details.flightPath.length > 0 && (
+                <div className="details-section">
+                  <FlightPath3D 
+                    flightPath={details.flightPath} 
+                    entry={details.entry}
+                  />
                 </div>
-                <div>
-                  <span className="label">Altitude:</span>
-                  <span className="value">
-                    {Math.round(details.averages?.altitude || 0)} ft
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>
-                      ({(details.averages?.altitudeDeviation >= 0 ? '+' : '') + 
-                       Math.round(details.averages?.altitudeDeviation || 0)})
-                    </span>
-                  </span>
-                </div>
-                <div>
-                  <span className="label">Airspeed:</span>
-                  <span className="value">
-                    {Math.round(details.averages?.airspeed || 0)} kt
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginLeft: '8px' }}>
-                      ({(details.averages?.airspeedDeviation >= 0 ? '+' : '') + 
-                       Math.round(details.averages?.airspeedDeviation || 0)})
-                    </span>
-                  </span>
-                </div>
-              </div>
-            </div>
+              )}
+            </>
           )}
 
-          {details.flightPath && details.flightPath.length > 0 && (
-            <div className="details-section">
-              <FlightPath3D 
-                flightPath={details.flightPath} 
-                entry={details.entry}
-              />
-            </div>
+          {isLanding && (
+            <>
+              {details.phaseHistory && details.phaseHistory.length > 0 && (
+                <div className="details-section">
+                  <h3>Phase Timeline</h3>
+                  <div className="phases-list">
+                    {details.phaseHistory.map((phase, idx) => (
+                      <li key={idx}>
+                        <div>
+                          <strong>{phase.phase}</strong> @ {new Date(phase.timestamp).toLocaleTimeString()}
+                        </div>
+                        <div>
+                          Alt {Math.round(phase.data?.alt_ft || 0)} ft · Speed {Math.round(phase.data?.ias_kt || 0)} kt
+                        </div>
+                      </li>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {details.touchdown && (
+                <div className="details-section">
+                  <h3>Touchdown</h3>
+                  <div className="details-grid">
+                    <div>
+                      <span className="label">Distance from Threshold:</span>
+                      <span className="value">{Math.round(details.touchdown.distanceFromThreshold || 0)} ft</span>
+                    </div>
+                    <div>
+                      <span className="label">Speed:</span>
+                      <span className="value">{Math.round(details.touchdown.airspeed || 0)} kt</span>
+                    </div>
+                    <div>
+                      <span className="label">Vertical Speed:</span>
+                      <span className="value">{Math.round(Math.abs(details.touchdown.verticalSpeed || 0))} fpm</span>
+                    </div>
+                    <div>
+                      <span className="label">Firmness:</span>
+                      <span className={`value ${details.touchdown.firmness === 'hard' ? 'fail' : 'pass'}`}>
+                        {details.touchdown.firmness || 'normal'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {(details.runway || details.vref) && (
+                <div className="details-section">
+                  <h3>Runway</h3>
+                  <div className="details-grid">
+                    <div>
+                      <span className="label">Runway:</span>
+                      <span className="value">
+                        {getRunwayDisplayName(details.runway, customRunways)}
+                      </span>
+                    </div>
+                    {details.vref && (
+                      <div>
+                        <span className="label">Vref:</span>
+                        <span className="value">{details.vref} kt</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {details.violations && details.violations.length > 0 && (
+                <div className="details-section">
+                  <h3>Violations</h3>
+                  <ul className="violations-list">
+                    {details.violations.map((violation, idx) => (
+                      <li key={idx}>
+                        {violation.violation || violation}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+
+          {isPathFollowing && (
+            <>
+              {details.maxDeviations && (
+                <div className="details-section">
+                  <h3>Maximum Deviations</h3>
+                  <div className="deviation-grid">
+                    {details.maxDeviations.altitude !== undefined && (
+                      <div className={Math.abs(details.maxDeviations.altitude) <= 100 ? 'pass' : 'fail'}>
+                        <span className="label">Altitude:</span>
+                        <span className="value">{`${details.maxDeviations.altitude >= 0 ? '+' : ''}${Math.round(details.maxDeviations.altitude)} ft`}</span>
+                      </div>
+                    )}
+                    {details.maxDeviations.lateral !== undefined && (
+                      <div className={Math.abs(details.maxDeviations.lateral) <= 0.2 ? 'pass' : 'fail'}>
+                        <span className="label">Lateral:</span>
+                        <span className="value">{`${details.maxDeviations.lateral >= 0 ? '+' : ''}${Math.round(details.maxDeviations.lateral * 6076)} ft`}</span>
+                      </div>
+                    )}
+                    {details.maxDeviations.speed !== undefined && (
+                      <div className={Math.abs(details.maxDeviations.speed) <= 10 ? 'pass' : 'fail'}>
+                        <span className="label">Speed:</span>
+                        <span className="value">{`${details.maxDeviations.speed >= 0 ? '+' : ''}${Math.round(details.maxDeviations.speed)} kt`}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {(details.runway || details.pathName) && (
+                <div className="details-section">
+                  <h3>Path Info</h3>
+                  <div className="details-grid">
+                    {details.runway && (
+                      <div>
+                        <span className="label">Runway:</span>
+                        <span className="value">
+                          {getRunwayDisplayName(details.runway, customRunways)}
+                        </span>
+                      </div>
+                    )}
+                    {details.pathName && (
+                      <div>
+                        <span className="label">Reference Path:</span>
+                        <span className="value">{details.pathName}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {details.referencePath && details.referencePath.length > 0 && (
+                <div className="details-section">
+                  <h3>Reference Path</h3>
+                  <div className="details-grid">
+                    <div>
+                      <span className="label">Points:</span>
+                      <span className="value">{details.referencePath.length}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
