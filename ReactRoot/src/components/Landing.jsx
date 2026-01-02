@@ -172,12 +172,13 @@ export default function Landing({ user }) {
   const previousPhase = useRef(LANDING_PHASES.NONE)
   const lastGateCheck = useRef({})
   const touchdownData = useRef(null)
+  const landingDeviations = useRef({ maxAltDev: 0, maxSpeedDev: 0, maxBankDev: 0, maxPitchDev: 0, samples: [] })
   const dropdownRef = useRef(null)
   const pathDropdownRef = useRef(null)
   const startTrackingRef = useRef(() => {})
   const stopTrackingRef = useRef(() => {})
   const autoStartTriggered = useRef(false)
-  const [autoStartEnabled, setAutoStartEnabled] = useState(true)
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false)
   const [autoStartSkillLevel, setAutoStartSkillLevel] = useState(SKILL_LEVELS.ACS)
   const [autoStartStatus, setAutoStartStatus] = useState(null)
 
@@ -475,6 +476,32 @@ export default function Landing({ user }) {
           phase: phase,
           vs_fpm: data.vs_fpm
         }])
+
+        const distToThreshold = calculateDistance(
+          data.lat, data.lon,
+          runway.threshold.lat, runway.threshold.lon
+        )
+        if (distToThreshold < 5) {
+          const targetGlide = GLIDEPATH.getTargetAltitude(distToThreshold)
+          const altDev = targetGlide ? Math.abs(data.alt_ft - targetGlide.msl) : 0
+          const targetSpeed = vref + 5
+          const speedDev = Math.abs(data.ias_kt - targetSpeed)
+          const bankDev = Math.abs(data.bank_deg || 0)
+          const targetPitch = -3
+          const pitchDev = Math.abs((data.pitch_deg || 0) - targetPitch)
+
+          landingDeviations.current.maxAltDev = Math.max(landingDeviations.current.maxAltDev, altDev)
+          landingDeviations.current.maxSpeedDev = Math.max(landingDeviations.current.maxSpeedDev, speedDev)
+          landingDeviations.current.maxBankDev = Math.max(landingDeviations.current.maxBankDev, bankDev)
+          landingDeviations.current.maxPitchDev = Math.max(landingDeviations.current.maxPitchDev, pitchDev)
+          landingDeviations.current.samples.push({
+            timestamp: now,
+            altDev,
+            speedDev,
+            bankDev,
+            pitchDev
+          })
+        }
       }
     }
 
@@ -633,6 +660,7 @@ export default function Landing({ user }) {
     previousPhase.current = LANDING_PHASES.NONE
     lastGateCheck.current = {}
     touchdownData.current = null
+    landingDeviations.current = { maxAltDev: 0, maxSpeedDev: 0, maxBankDev: 0, maxPitchDev: 0, samples: [] }
     setState('tracking')
     
     // Initialize path following tracking if a reference path is selected
@@ -775,10 +803,16 @@ export default function Landing({ user }) {
       pathFollowingCompleting.current = true
       completePathFollowing()
     } else {
-      setTracking(false)
-      setState(connected ? 'ready' : 'disconnected')
-      setCurrentPhase(LANDING_PHASES.NONE)
-      setNearRunwayButNotPath(false)
+      // Save landing data if we have any tracking data, even without a landing path selected
+      if (flightPath.length > 0 || phaseHistory.length > 0 || violations.length > 0 || gatesPassed.length > 0) {
+        setTracking(false)
+        completeLanding()
+      } else {
+        setTracking(false)
+        setState(connected ? 'ready' : 'disconnected')
+        setCurrentPhase(LANDING_PHASES.NONE)
+        setNearRunwayButNotPath(false)
+      }
     }
   }
 
@@ -902,20 +936,44 @@ export default function Landing({ user }) {
     if (!hasBeenSaved.current) {
       hasBeenSaved.current = true
       
-      // Calculate grade
-      const criticalViolations = violations.filter(v => 
-        v.phase === LANDING_PHASES.FINAL || 
-        v.phase === LANDING_PHASES.THRESHOLD
-      )
-      
-      const unstableApproach = gatesPassed.some(g => !g.compliant)
-      const hardLanding = touchdownData.current?.firmness === 'hard'
-      
-      const allPass = criticalViolations.length === 0 && !unstableApproach && !hardLanding
-      const grade = allPass ? 'PASS' : 'FAIL'
+      const { maxAltDev, maxSpeedDev, maxBankDev, maxPitchDev } = landingDeviations.current
+
+      const busted = {
+        altitude: maxAltDev > 100,
+        speed: maxSpeedDev > 10,
+        bank: maxBankDev > 5,
+        pitch: maxPitchDev > 3
+      }
+
+      const gradeData = gradePathFollowing({
+        maxAltDev,
+        maxLateralDev: 0,
+        maxSpeedDev,
+        maxBankDev,
+        maxPitchDev,
+        busted: { ...busted, lateral: false },
+        skillLevel: pathFollowingSkillLevel
+      })
       
       const result = {
-        grade,
+        grade: gradeData.finalGrade,
+        gradeDetails: {
+          ...gradeData,
+          breakdown: {
+            altitude: gradeData.breakdown.altitude,
+            speed: gradeData.breakdown.speed,
+            bank: gradeData.breakdown.bank,
+            pitch: gradeData.breakdown.pitch
+          }
+        },
+        maxDeviations: {
+          altitude: maxAltDev,
+          speed: maxSpeedDev,
+          bank: maxBankDev,
+          pitch: maxPitchDev
+        },
+        busted,
+        skillLevel: pathFollowingSkillLevel,
         phaseHistory,
         phaseMetrics,
         gatesPassed,
@@ -935,7 +993,7 @@ export default function Landing({ user }) {
       
       // Save to database
       saveLandingToDatabase(user.id, {
-        grade,
+        grade: gradeData.finalGrade,
         details: result
       })
     }
@@ -1215,6 +1273,7 @@ export default function Landing({ user }) {
     hasBeenSaved.current = false
     previousPhase.current = LANDING_PHASES.NONE
     lastGateCheck.current = {}
+    landingDeviations.current = { maxAltDev: 0, maxSpeedDev: 0, maxBankDev: 0, maxPitchDev: 0, samples: [] }
     touchdownData.current = null
   }
 
@@ -1496,6 +1555,13 @@ export default function Landing({ user }) {
                 onClick={tracking ? stopTracking : startTracking}
               >
                 {tracking ? 'Stop Tracking' : 'Start Tracking'}
+              </button>
+              <button
+                className="big-button reset"
+                onClick={reset}
+                disabled={recordingPath}
+              >
+                Reset
               </button>
               {recordingPath && (
                 <div style={{ 
@@ -1890,8 +1956,8 @@ export default function Landing({ user }) {
               </>
             )}
 
-            {/* Approach Path Visualization - Show when tracking OR autostart is enabled */}
-            {(tracking || (autoStartEnabled && connected && data && runway)) && (
+            {/* Approach Path Visualization - Show when connected with data and runway selected */}
+            {connected && data && runway && (
               <div className="card">
                 <h2>Approach Path</h2>
                 <ApproachPath
@@ -1908,11 +1974,85 @@ export default function Landing({ user }) {
 
             {/* Complete Summary */}
             {state === 'complete' && landingResult && (
-              <div className="card grade-card">
-                <h2>Landing Complete</h2>
-                <div className={`grade ${landingResult.grade.toLowerCase()}`}>
-                  {landingResult.grade}
+              <div className={`card grade-card ${getGradeColorClass(landingResult.grade)}`}>
+                <div className="grade-header">
+                  <div className={`grade ${getGradeColorClass(landingResult.grade)}`}>
+                    {landingResult.grade}
+                  </div>
+                  {landingResult.skillLevel && (
+                    <div className="skill-level-badge">
+                      {landingResult.skillLevel.charAt(0).toUpperCase() + landingResult.skillLevel.slice(1)}
+                    </div>
+                  )}
                 </div>
+
+                {landingResult.gradeDetails && (
+                  <div className="grade-breakdown">
+                    <h3>Grade Breakdown</h3>
+                    <div className="breakdown-grid">
+                      <div className="breakdown-item">
+                        <span>Altitude:</span>
+                        <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.altitude)}>
+                          {landingResult.gradeDetails.breakdown.altitude}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Speed:</span>
+                        <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.speed)}>
+                          {landingResult.gradeDetails.breakdown.speed}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Bank:</span>
+                        <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.bank)}>
+                          {landingResult.gradeDetails.breakdown.bank}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Pitch:</span>
+                        <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.pitch)}>
+                          {landingResult.gradeDetails.breakdown.pitch}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {landingResult.maxDeviations && (
+                  <div className="touchdown-summary">
+                    <h3>Maximum Deviations</h3>
+                    <div className="touchdown-details">
+                      <div className="detail-row">
+                        <span>Altitude (from glidepath):</span>
+                        <span className={landingResult.busted?.altitude ? 'bad' : 'good'}>
+                          {Math.round(landingResult.maxDeviations.altitude)} ft
+                          {landingResult.busted?.altitude ? ' ⚠ BUSTED' : ' ✓'}
+                        </span>
+                      </div>
+                      <div className="detail-row">
+                        <span>Speed (from Vref+5):</span>
+                        <span className={landingResult.busted?.speed ? 'bad' : 'good'}>
+                          {Math.round(landingResult.maxDeviations.speed)} kt
+                          {landingResult.busted?.speed ? ' ⚠ BUSTED' : ' ✓'}
+                        </span>
+                      </div>
+                      <div className="detail-row">
+                        <span>Bank Angle:</span>
+                        <span className={landingResult.busted?.bank ? 'bad' : 'good'}>
+                          {Math.round(landingResult.maxDeviations.bank)}°
+                          {landingResult.busted?.bank ? ' ⚠ BUSTED' : ' ✓'}
+                        </span>
+                      </div>
+                      <div className="detail-row">
+                        <span>Pitch Angle:</span>
+                        <span className={landingResult.busted?.pitch ? 'bad' : 'good'}>
+                          {Math.round(landingResult.maxDeviations.pitch)}°
+                          {landingResult.busted?.pitch ? ' ⚠ BUSTED' : ' ✓'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {touchdownData.current && (
                   <div className="touchdown-summary">
@@ -1940,18 +2080,12 @@ export default function Landing({ user }) {
                   </div>
                 )}
 
-                {violations.length > 0 && (
-                  <div className="violations-summary">
-                    <h3>Deviations ({violations.length})</h3>
-                    <div className="violations-list">
-                      {violations.slice(-10).reverse().map((v, idx) => (
-                        <div key={idx} className="violation-item">
-                          <span className="phase-badge">{PHASE_STANDARDS[v.phase]?.name}</span>
-                          <span className="violation-text">{v.violation}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                {landingResult.flightPath && landingResult.flightPath.length > 0 && (
+                  <ApproachPathReplay
+                    runway={runway}
+                    flightPath={landingResult.flightPath}
+                    referencePath={selectedLandingPath ? savedLandingPaths.find(p => p.id === selectedLandingPath)?.path_data : null}
+                  />
                 )}
 
                 <button className="big-button reset" onClick={reset}>

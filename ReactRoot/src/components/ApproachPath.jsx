@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   LANDING_PHASES,
   GLIDEPATH,
@@ -34,10 +34,15 @@ export default function ApproachPath({
   distanceToThreshold,
   selectedLandingPath = null,
   replayIndex = null,
-  isReplayMode = false
+  isReplayMode = false,
+  topViewZoom = 1.0,
+  onTopViewDoubleClick = null
 }) {
   const topViewCanvasRef = useRef(null)
   const sideViewCanvasRef = useRef(null)
+  const [topViewPan, setTopViewPan] = useState({ x: 0, y: 0 })
+  const [isDragging, setIsDragging] = useState(false)
+  const lastMousePosRef = useRef({ x: 0, y: 0 })
 
   const effectiveAircraftData = isReplayMode && replayIndex != null && flightPath && flightPath[replayIndex]
     ? {
@@ -59,7 +64,7 @@ export default function ApproachPath({
 
     drawTopView()
     drawSideView()
-  }, [runway, effectiveAircraftData, flightPath, currentPhase, selectedLandingPath, replayIndex, isReplayMode])
+  }, [runway, effectiveAircraftData, flightPath, currentPhase, selectedLandingPath, replayIndex, isReplayMode, topViewZoom, topViewPan])
 
   function drawTopView() {
     const canvas = topViewCanvasRef.current
@@ -73,8 +78,9 @@ export default function ApproachPath({
     ctx.clearRect(0, 0, width, height)
     
     // Set up coordinate system (center = aircraft position)
-    // Scale: 1 NM = 80 pixels
-    const scale = 80 // pixels per NM
+    // Scale: 1 NM = 80 pixels (base scale, multiplied by zoom)
+    const baseScale = 80 // pixels per NM
+    const scale = baseScale * topViewZoom
     const centerX = width / 2
     const centerY = height / 2 // Center of canvas
 
@@ -100,9 +106,9 @@ export default function ApproachPath({
       aircraftY = 0
     }
 
-    // Draw everything relative to aircraft position
+    // Draw everything relative to aircraft position (with pan offset)
     ctx.save()
-    ctx.translate(centerX, centerY)
+    ctx.translate(centerX + topViewPan.x, centerY + topViewPan.y)
     
     // Calculate runway position relative to aircraft
     let runwayX = 0
@@ -822,6 +828,48 @@ export default function ApproachPath({
     ctx.fillText('Threshold', thresholdLabelX, axisY + TICK_MARK_LABEL_OFFSET_Y)
   }
 
+  // Mouse handlers for top view panning
+  const handleTopViewMouseDown = (e) => {
+    if (!isReplayMode) return // Only allow panning in replay mode
+    setIsDragging(true)
+    lastMousePosRef.current = { x: e.clientX, y: e.clientY }
+    e.preventDefault()
+  }
+
+  const handleTopViewMouseMove = (e) => {
+    if (!isDragging || !isReplayMode) return
+    const deltaX = e.clientX - lastMousePosRef.current.x
+    const deltaY = e.clientY - lastMousePosRef.current.y
+    setTopViewPan(prev => ({
+      x: prev.x + deltaX,
+      y: prev.y + deltaY
+    }))
+    lastMousePosRef.current = { x: e.clientX, y: e.clientY }
+    e.preventDefault()
+  }
+
+  const handleTopViewMouseUp = () => {
+    setIsDragging(false)
+  }
+
+  const handleTopViewMouseLeave = () => {
+    setIsDragging(false)
+  }
+
+  const handleTopViewDoubleClick = () => {
+    if (isReplayMode && onTopViewDoubleClick) {
+      setTopViewPan({ x: 0, y: 0 })
+      onTopViewDoubleClick()
+    }
+  }
+
+  // Reset pan when zoom changes
+  useEffect(() => {
+    if (isReplayMode) {
+      setTopViewPan({ x: 0, y: 0 })
+    }
+  }, [topViewZoom, isReplayMode])
+
   return (
     <div className="approach-path">
       <div className="view-container">
@@ -830,7 +878,13 @@ export default function ApproachPath({
           ref={topViewCanvasRef}
           width={400}
           height={300}
-          className="path-canvas"
+          className={`path-canvas ${isReplayMode ? 'draggable' : ''}`}
+          onMouseDown={handleTopViewMouseDown}
+          onMouseMove={handleTopViewMouseMove}
+          onMouseUp={handleTopViewMouseUp}
+          onMouseLeave={handleTopViewMouseLeave}
+          onDoubleClick={handleTopViewDoubleClick}
+          style={{ cursor: isReplayMode ? (isDragging ? 'grabbing' : 'grab') : 'default' }}
         />
       </div>
       

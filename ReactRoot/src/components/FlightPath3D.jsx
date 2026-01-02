@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import * as THREE from 'three'
 import './FlightPath3D.css'
-import { GLIDEPATH } from '../utils/landingStandards'
+import { GLIDEPATH, calculateDistance } from '../utils/landingStandards'
 
 const getAltitudeGuideClass = (deviation) => {
   const absDev = Math.abs(deviation)
@@ -10,11 +10,21 @@ const getAltitudeGuideClass = (deviation) => {
   return 'bad'
 }
 
-const getBankGuideClass = (bank) => {
-  const absBank = Math.abs(bank || 0)
-  if (absBank <= 5) return 'good'
-  if (absBank <= 12) return 'warning'
-  return 'bad'
+const getBankGuideClass = (bank, maneuverType) => {
+  if (maneuverType === 'steep_turn') {
+    // For steep turns: deviation from 45° target
+    const absBank = Math.abs(bank || 0)
+    const bankDev = Math.abs(absBank - 45)
+    if (bankDev <= 2) return 'good'
+    if (bankDev <= 5) return 'warning'
+    return 'bad'
+  } else {
+    // For landing/path_following: absolute bank (low is good)
+    const absBank = Math.abs(bank || 0)
+    if (absBank <= 5) return 'good'
+    if (absBank <= 12) return 'warning'
+    return 'bad'
+  }
 }
 
 // Track component instances
@@ -388,6 +398,55 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     // If never reaches level, use last point
     if (rolloutEndIndex === -1) rolloutEndIndex = pathData.length - 1
 
+    // Find point with highest bank deviation (only during turn, before rollout)
+    // Only track after 45 degrees of turn have been completed
+    let maxBankDevIndex = -1
+    let maxBankDev = 0
+    const establishmentThreshold = 30 // Bank angle when turn is considered established
+    
+    if (maneuverType === 'steep_turn') {
+      // Only look at points after turn is established and before rollout starts
+      const searchEnd = rolloutStartIndex >= 0 ? rolloutStartIndex : pathData.length
+      
+      // Calculate turn progress to find when we've completed 45 degrees
+      let turnProgress = 0
+      let lastHdgForDev = pathData[entryIndex]?.heading
+      let hasReached45Degrees = false
+      
+      for (let i = entryIndex; i < searchEnd; i++) {
+        const bankAbs = Math.abs(pathData[i].bank || 0)
+        const hdg = pathData[i].heading
+        
+        // Calculate turn progress
+        if (turnDirection && lastHdgForDev != null && hdg != null) {
+          let delta = hdg - lastHdgForDev
+          while (delta > 180) delta -= 360
+          while (delta < -180) delta += 360
+          
+          if (turnDirection === 'right' && delta > 0) {
+            turnProgress += delta
+          } else if (turnDirection === 'left' && delta < 0) {
+            turnProgress += Math.abs(delta)
+          }
+        }
+        lastHdgForDev = hdg
+        
+        // Only start tracking after 45 degrees of turn
+        if (turnProgress >= 45) {
+          hasReached45Degrees = true
+        }
+        
+        // Only consider points where turn is established (bank >= threshold) and we've completed 45 degrees
+        if (hasReached45Degrees && bankAbs >= establishmentThreshold) {
+          const bankDev = Math.abs(bankAbs - 45)
+          if (bankDev > maxBankDev) {
+            maxBankDev = bankDev
+            maxBankDevIndex = i
+          }
+        }
+      }
+    }
+
     // Extract level flight segment (2-3 seconds before entry) if we have data
     let levelFlightPoints = []
     let levelFlightData = []
@@ -494,10 +553,10 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
       }
     }
 
-    // Create level flight segment (before turn)
+    // Create level flight segment (before turn) - only for steep turns
     let levelFlightGeometry = null
     let levelFlightMaterial = null
-    if (levelFlightPoints && levelFlightPoints.length >= 2) {
+    if (maneuverType === 'steep_turn' && levelFlightPoints && levelFlightPoints.length >= 2) {
       try {
         // Use LineCurve3 for a simple straight segment, or CatmullRomCurve3 with closed: false
         let levelFlightCurve
@@ -571,8 +630,28 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     const mainPathEndIndex = sampledRolloutStartIndex >= 0 ? sampledRolloutStartIndex + 1 : sampledData.length
 
     for (let i = 0; i < mainPathEndIndex && i < sampledData.length; i++) {
-
-      const altDev = sampledData[i].alt - originAlt
+      let altDev
+      
+      // For landing/path_following, calculate deviation from glidepath target altitude
+      if ((maneuverType === 'landing' || maneuverType === 'path_following') && runway?.threshold) {
+        const distanceNM = calculateDistance(
+          sampledData[i].lat,
+          sampledData[i].lon,
+          runway.threshold.lat,
+          runway.threshold.lon
+        )
+        const targetAlt = GLIDEPATH.getTargetAltitude(distanceNM)
+        if (targetAlt && targetAlt.msl != null) {
+          altDev = sampledData[i].alt - targetAlt.msl
+        } else {
+          altDev = sampledData[i].alt - originAlt
+        }
+      } else {
+        // For steep turn, calculate deviation from entry altitude
+        const entryAlt = entry?.altitude || entry?.alt || originAlt
+        altDev = sampledData[i].alt - entryAlt
+      }
+      
       let category = getColorCategory(altDev)
       
       // After rollout starts, don't show green - use warning or bad colors instead
@@ -875,126 +954,181 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     scene.add(planeGroup)
     planeRef.current = planeGroup
 
-    const entryMarkerGroup = new THREE.Group()
-    
-    const entryGeometry = new THREE.SphereGeometry(35, 32, 32)
-    const entryMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.8,
-      metalness: 0.4,
-      roughness: 0.3,
-      transparent: true,
-      opacity: 0.95
-    })
-    const entryMarker = new THREE.Mesh(entryGeometry, entryMaterial)
-    entryMarker.castShadow = true
-    entryMarkerGroup.add(entryMarker)
-    
-    const entryRingGeometry = new THREE.TorusGeometry(45, 3, 16, 32)
-    const entryRingMaterial = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.6,
-      metalness: 0.5,
-      roughness: 0.3,
-      transparent: true,
-      opacity: 0.7
-    })
-    const entryRing = new THREE.Mesh(entryRingGeometry, entryRingMaterial)
-    entryRing.rotation.x = Math.PI / 2
-    entryRing.castShadow = true
-    entryMarkerGroup.add(entryRing)
-    
-    // Position entry marker at actual entry point (where roll begins)
-    const entryPoint = entryIndex >= 0 && entryIndex < pathPoints.length 
-      ? pathPoints[entryIndex] 
-      : new THREE.Vector3(0, 0, 0)
-    entryMarkerGroup.position.copy(entryPoint)
-    scene.add(entryMarkerGroup)
-
-    let rolloutPoints = []
+    // Entry marker and rollout segment - only for steep turns
+    let entryGeometry = null
+    let entryMaterial = null
+    let entryRingGeometry = null
+    let entryRingMaterial = null
+    let rolloutStartGeometry = null
+    let rolloutStartMaterial = null
+    let exitGeometry = null
+    let exitMaterial = null
     let rolloutGeometry = null
     let rolloutMaterial = null
+    
+    if (maneuverType === 'steep_turn') {
+      const entryMarkerGroup = new THREE.Group()
+      
+      entryGeometry = new THREE.SphereGeometry(35, 32, 32)
+      entryMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x00ffff,
+        emissive: 0x00ffff,
+        emissiveIntensity: 0.8,
+        metalness: 0.4,
+        roughness: 0.3,
+        transparent: true,
+        opacity: 0.95
+      })
+      const entryMarker = new THREE.Mesh(entryGeometry, entryMaterial)
+      entryMarker.castShadow = true
+      entryMarkerGroup.add(entryMarker)
+      
+      entryRingGeometry = new THREE.TorusGeometry(45, 3, 16, 32)
+      entryRingMaterial = new THREE.MeshStandardMaterial({
+        color: 0x00ffff,
+        emissive: 0x00ffff,
+        emissiveIntensity: 0.6,
+        metalness: 0.5,
+        roughness: 0.3,
+        transparent: true,
+        opacity: 0.7
+      })
+      const entryRing = new THREE.Mesh(entryRingGeometry, entryRingMaterial)
+      entryRing.rotation.x = Math.PI / 2
+      entryRing.castShadow = true
+      entryMarkerGroup.add(entryRing)
+      
+      // Position entry marker at actual entry point (where roll begins)
+      const entryPoint = entryIndex >= 0 && entryIndex < pathPoints.length 
+        ? pathPoints[entryIndex] 
+        : new THREE.Vector3(0, 0, 0)
+      entryMarkerGroup.position.copy(entryPoint)
+      scene.add(entryMarkerGroup)
 
-    // Build rollout segment using sampled points to match main path
-    // Start from the rollout start point (which is included in main path) to ensure connection
-    if (sampledRolloutStartIndex >= 0 && sampledRolloutEndIndex >= sampledRolloutStartIndex) {
-      // Include the rollout start point to connect with main path
-      for (let i = sampledRolloutStartIndex; i <= sampledRolloutEndIndex && i < sampledPoints.length; i++) {
-        rolloutPoints.push(sampledPoints[i])
-      }
-      // If we only got a single point, add the end point (if available) or duplicate with a tiny offset
-      if (rolloutPoints.length === 1) {
-        const endPoint = sampledPoints[Math.min(sampledRolloutEndIndex, sampledPoints.length - 1)]
-        if (endPoint && endPoint !== rolloutPoints[0]) {
-          rolloutPoints.push(endPoint)
-        } else {
-          rolloutPoints.push(rolloutPoints[0].clone().add(new THREE.Vector3(0.01, 0, 0)))
+      let rolloutPoints = []
+
+      // Build rollout segment using sampled points to match main path
+      // Start from the rollout start point (which is included in main path) to ensure connection
+      if (sampledRolloutStartIndex >= 0 && sampledRolloutEndIndex >= sampledRolloutStartIndex) {
+        // Include the rollout start point to connect with main path
+        for (let i = sampledRolloutStartIndex; i <= sampledRolloutEndIndex && i < sampledPoints.length; i++) {
+          rolloutPoints.push(sampledPoints[i])
+        }
+        // If we only got a single point, add the end point (if available) or duplicate with a tiny offset
+        if (rolloutPoints.length === 1) {
+          const endPoint = sampledPoints[Math.min(sampledRolloutEndIndex, sampledPoints.length - 1)]
+          if (endPoint && endPoint !== rolloutPoints[0]) {
+            rolloutPoints.push(endPoint)
+          } else {
+            rolloutPoints.push(rolloutPoints[0].clone().add(new THREE.Vector3(0.01, 0, 0)))
+          }
         }
       }
+
+      if (rolloutPoints.length >= 2) {
+        const rolloutCurve = new THREE.CatmullRomCurve3(rolloutPoints, false, 'centripetal')
+        rolloutGeometry = new THREE.TubeGeometry(rolloutCurve, Math.max(rolloutPoints.length * 2, 10), 18, 8, false)
+        rolloutMaterial = new THREE.MeshStandardMaterial({
+          color: 0xff00ff,
+          emissive: 0xff00ff,
+          emissiveIntensity: 1.5,
+          metalness: 0.0,
+          roughness: 0.2,
+          transparent: false,
+          opacity: 1.0,
+          depthWrite: true,
+          depthTest: true
+        })
+        const rolloutSegment = new THREE.Mesh(rolloutGeometry, rolloutMaterial)
+        rolloutSegment.castShadow = true
+        rolloutSegment.receiveShadow = false
+        rolloutSegment.renderOrder = 1000
+        scene.add(rolloutSegment)
+      }
     }
 
-    if (rolloutPoints.length >= 2) {
-      const rolloutCurve = new THREE.CatmullRomCurve3(rolloutPoints, false, 'centripetal')
-      rolloutGeometry = new THREE.TubeGeometry(rolloutCurve, Math.max(rolloutPoints.length * 2, 10), 18, 8, false)
-      rolloutMaterial = new THREE.MeshStandardMaterial({
+    // Rollout start marker (bank decreases below ½ target bank) - only for steep turns
+    if (maneuverType === 'steep_turn') {
+      const rolloutStartPoint = sampledRolloutStartIndex >= 0 && sampledRolloutStartIndex < sampledPoints.length
+        ? sampledPoints[sampledRolloutStartIndex]
+        : (sampledPoints.length > 0 ? sampledPoints[sampledPoints.length - 1] : new THREE.Vector3(0, 0, 0))
+      
+      rolloutStartGeometry = new THREE.SphereGeometry(32, 32, 32)
+      rolloutStartMaterial = new THREE.MeshStandardMaterial({ 
         color: 0xff00ff,
         emissive: 0xff00ff,
-        emissiveIntensity: 1.5,
-        metalness: 0.0,
-        roughness: 0.2,
-        transparent: false,
-        opacity: 1.0,
-        depthWrite: true,
-        depthTest: true
+        emissiveIntensity: 0.7,
+        metalness: 0.4,
+        roughness: 0.3,
+        transparent: true,
+        opacity: 0.95
       })
-      const rolloutSegment = new THREE.Mesh(rolloutGeometry, rolloutMaterial)
-      rolloutSegment.castShadow = true
-      rolloutSegment.receiveShadow = false
-      rolloutSegment.renderOrder = 1000
-      scene.add(rolloutSegment)
+      const rolloutStartMarker = new THREE.Mesh(rolloutStartGeometry, rolloutStartMaterial)
+      rolloutStartMarker.position.copy(rolloutStartPoint)
+      rolloutStartMarker.castShadow = true
+      scene.add(rolloutStartMarker)
     }
 
-    // Rollout start marker (bank decreases below ½ target bank)
-    // Use sampled point to match main path and rollout segment
-    const rolloutStartPoint = sampledRolloutStartIndex >= 0 && sampledRolloutStartIndex < sampledPoints.length
-      ? sampledPoints[sampledRolloutStartIndex]
-      : (sampledPoints.length > 0 ? sampledPoints[sampledPoints.length - 1] : new THREE.Vector3(0, 0, 0))
-    
-    const rolloutStartGeometry = new THREE.SphereGeometry(32, 32, 32)
-    const rolloutStartMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0xff00ff,
-      emissive: 0xff00ff,
-      emissiveIntensity: 0.7,
-      metalness: 0.4,
-      roughness: 0.3,
-      transparent: true,
-      opacity: 0.95
-    })
-    const rolloutStartMarker = new THREE.Mesh(rolloutStartGeometry, rolloutStartMaterial)
-    rolloutStartMarker.position.copy(rolloutStartPoint)
-    rolloutStartMarker.castShadow = true
-    scene.add(rolloutStartMarker)
+    // Exit/completion marker (final point) - only for steep turns
+    if (maneuverType === 'steep_turn') {
+      const lastPoint = rolloutEndIndex >= 0 && rolloutEndIndex < pathPoints.length
+        ? pathPoints[rolloutEndIndex]
+        : pathPoints[pathPoints.length - 1]
+      exitGeometry = new THREE.SphereGeometry(30, 32, 32)
+      exitMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0x888888,
+        emissive: 0x222222,
+        emissiveIntensity: 0.3,
+        metalness: 0.4,
+        roughness: 0.3,
+        transparent: true,
+        opacity: 0.8
+      })
+      const exitMarker = new THREE.Mesh(exitGeometry, exitMaterial)
+      exitMarker.position.copy(lastPoint)
+      exitMarker.castShadow = true
+      scene.add(exitMarker)
+    }
 
-    // Exit/completion marker (final point)
-    const lastPoint = rolloutEndIndex >= 0 && rolloutEndIndex < pathPoints.length
-      ? pathPoints[rolloutEndIndex]
-      : pathPoints[pathPoints.length - 1]
-    const exitGeometry = new THREE.SphereGeometry(30, 32, 32)
-    const exitMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x888888,
-      emissive: 0x222222,
-      emissiveIntensity: 0.3,
-      metalness: 0.4,
-      roughness: 0.3,
-      transparent: true,
-      opacity: 0.8
-    })
-    const exitMarker = new THREE.Mesh(exitGeometry, exitMaterial)
-    exitMarker.position.copy(lastPoint)
-    exitMarker.castShadow = true
-    scene.add(exitMarker)
+    // Max bank deviation marker - only for steep turns
+    let maxBankDevGeometry = null
+    let maxBankDevMaterial = null
+    let maxBankDevRingGeometry = null
+    let maxBankDevRingMaterial = null
+    if (maneuverType === 'steep_turn' && maxBankDevIndex >= 0 && maxBankDevIndex < pathPoints.length) {
+      const maxBankDevPoint = pathPoints[maxBankDevIndex]
+      maxBankDevGeometry = new THREE.SphereGeometry(34, 32, 32)
+      maxBankDevMaterial = new THREE.MeshStandardMaterial({ 
+        color: 0xff6600,
+        emissive: 0xff6600,
+        emissiveIntensity: 0.8,
+        metalness: 0.4,
+        roughness: 0.3,
+        transparent: true,
+        opacity: 0.95
+      })
+      const maxBankDevMarker = new THREE.Mesh(maxBankDevGeometry, maxBankDevMaterial)
+      maxBankDevMarker.position.copy(maxBankDevPoint)
+      maxBankDevMarker.castShadow = true
+      scene.add(maxBankDevMarker)
+      
+      // Add a ring around the marker for better visibility
+      maxBankDevRingGeometry = new THREE.TorusGeometry(44, 3, 16, 32)
+      maxBankDevRingMaterial = new THREE.MeshStandardMaterial({
+        color: 0xff6600,
+        emissive: 0xff6600,
+        emissiveIntensity: 0.6,
+        metalness: 0.5,
+        roughness: 0.3,
+        transparent: true,
+        opacity: 0.7
+      })
+      const maxBankDevRing = new THREE.Mesh(maxBankDevRingGeometry, maxBankDevRingMaterial)
+      maxBankDevRing.rotation.x = Math.PI / 2
+      maxBankDevRing.position.copy(maxBankDevPoint)
+      maxBankDevRing.castShadow = true
+      scene.add(maxBankDevRing)
+    }
 
     // Calculate center of flight path for positioning grid and camera
     const box = new THREE.Box3().setFromPoints(pathPoints)
@@ -1044,7 +1178,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
       const runwayDir = oppositeVec.clone().sub(thresholdVec).normalize()
       const runwayYaw = Math.atan2(runwayDir.x, runwayDir.z)
       const runwayMesh = new THREE.Mesh(
-        new THREE.BoxGeometry(runwayLengthMeters, 0.2, runwayWidthMeters),
+        new THREE.BoxGeometry(runwayWidthMeters, 0.2, runwayLengthMeters),
         new THREE.MeshStandardMaterial({
           color: 0x10121c,
           metalness: 0.3,
@@ -1080,27 +1214,6 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
       thresholdMarker.position.set(thresholdVec.x, 0.15, thresholdVec.z)
       scene.add(thresholdMarker)
       landingVisuals.push(thresholdMarker)
-      const headingRad = ((runway.heading || 0) * Math.PI) / 180
-      const approachDir = new THREE.Vector3(Math.sin(headingRad), 0, -Math.cos(headingRad)).normalize()
-      const inboundDir = approachDir.clone().negate()
-      const glideDistances = [5, 4, 3, 2, 1, 0.5, 0]
-      const glidePoints = glideDistances.map((dist) => {
-        const offset = inboundDir.clone().multiplyScalar(dist * 1852)
-        const point = thresholdVec.clone().add(offset)
-        const targetAltitude = GLIDEPATH.getTargetAltitude(dist).msl
-        point.y = (targetAltitude - originAlt) * 0.3048
-        return point
-      })
-      if (glidePoints.length >= 2) {
-        const glideGeometry = new THREE.BufferGeometry().setFromPoints(glidePoints)
-        const glideMaterial = new THREE.LineBasicMaterial({
-          color: 0x4ad3ff,
-          linewidth: 2
-        })
-        const glideLine = new THREE.Line(glideGeometry, glideMaterial)
-        scene.add(glideLine)
-        landingVisuals.push(glideLine)
-      }
       if (pathPoints.length > 0) {
         const touchdownPoint = pathPoints[pathPoints.length - 1]
         const touchdownSphere = new THREE.Mesh(
@@ -1377,7 +1490,10 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
         }
       } else if (!isPlayingRef.current && pathData.length > 0) {
         // When paused, update currentData based on animation progress
-        const progress = Math.max(0, Math.min(1, animationProgress))
+        // Use animationTimeRef to get the actual paused position, not animationProgress state which might be stale
+        const duration = animationDurationRef.current
+        const currentTime = animationTimeRef.current
+        const progress = duration > 0 ? Math.max(0, Math.min(1, currentTime / duration)) : 0
         const exactIndex = progress * (pathData.length - 1)
         const pathIndex = Math.floor(exactIndex)
         const nextIndex = Math.min(pathIndex + 1, pathData.length - 1)
@@ -1386,21 +1502,24 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
         const currentPathData = pathData[pathIndex]
         const nextPathData = pathData[nextIndex]
         
-        if (currentPathData && nextPathData) {
-          const pausedData = {
-            lat: THREE.MathUtils.lerp(currentPathData.lat, nextPathData.lat, t),
-            lon: THREE.MathUtils.lerp(currentPathData.lon, nextPathData.lon, t),
-            alt: THREE.MathUtils.lerp(currentPathData.alt, nextPathData.alt, t),
-            bank: THREE.MathUtils.lerp(currentPathData.bank, nextPathData.bank, t),
-            heading: THREE.MathUtils.lerp(currentPathData.heading, nextPathData.heading, t),
-            airspeed: THREE.MathUtils.lerp(currentPathData.airspeed, nextPathData.airspeed, t),
-            pitch: THREE.MathUtils.lerp(currentPathData.pitch, nextPathData.pitch, t)
+        // Only update if we're at a different index to avoid unnecessary updates
+        if (pathIndex !== lastPausedIndexRef.current || Math.abs(t - 0.5) > 0.1) {
+          if (currentPathData && nextPathData) {
+            const pausedData = {
+              lat: THREE.MathUtils.lerp(currentPathData.lat, nextPathData.lat, t),
+              lon: THREE.MathUtils.lerp(currentPathData.lon, nextPathData.lon, t),
+              alt: THREE.MathUtils.lerp(currentPathData.alt, nextPathData.alt, t),
+              bank: THREE.MathUtils.lerp(currentPathData.bank, nextPathData.bank, t),
+              heading: THREE.MathUtils.lerp(currentPathData.heading, nextPathData.heading, t),
+              airspeed: THREE.MathUtils.lerp(currentPathData.airspeed, nextPathData.airspeed, t),
+              pitch: THREE.MathUtils.lerp(currentPathData.pitch, nextPathData.pitch, t)
+            }
+            setCurrentData(pausedData)
+            lastPausedIndexRef.current = pathIndex
+          } else if (currentPathData) {
+            setCurrentData(currentPathData)
+            lastPausedIndexRef.current = pathIndex
           }
-          setCurrentData(pausedData)
-          lastPausedIndexRef.current = pathIndex
-        } else if (currentPathData) {
-          setCurrentData(currentPathData)
-          lastPausedIndexRef.current = pathIndex
         }
       }
       
@@ -1443,6 +1562,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
       entryRingGeometry,
       rolloutStartGeometry,
       exitGeometry,
+      maxBankDevGeometry,
+      maxBankDevRingGeometry,
       planeGeometry,
       levelFlightGeometry,
       rolloutGeometry,
@@ -1455,6 +1576,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
       entryRingMaterial,
       rolloutStartMaterial,
       exitMaterial,
+      maxBankDevMaterial,
+      maxBankDevRingMaterial,
       planeMaterial,
       levelFlightMaterial,
       rolloutMaterial,
@@ -1615,7 +1738,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
   }
 
   const altitudeGuideClass = currentData ? getAltitudeGuideClass(altitudeDeviation) : ''
-  const bankGuideClass = currentData ? getBankGuideClass(currentData.bank) : ''
+  const bankGuideClass = currentData ? getBankGuideClass(currentData.bank, maneuverType) : ''
 
   if (!flightPath || flightPath.length === 0) {
     return (
@@ -1706,10 +1829,6 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
                 <span>Runway Centerline</span>
               </div>
               <div className="legend-item">
-                <span className="legend-color" style={{ background: '#4ad3ff' }}></span>
-                <span>Glidepath Target</span>
-              </div>
-              <div className="legend-item">
                 <span className="legend-color" style={{ background: '#ff4444', borderRadius: '50%' }}></span>
                 <span>Threshold Marker</span>
               </div>
@@ -1747,6 +1866,10 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
               <div className="legend-item">
                 <span className="legend-color" style={{ background: '#ff00ff' }}></span>
                 <span>Rollout Segment</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ff6600', borderRadius: '50%' }}></span>
+                <span>Max Bank Deviation</span>
               </div>
               <div className="legend-item">
                 <span className="legend-color" style={{ background: '#00ff00' }}></span>

@@ -7,6 +7,7 @@ export default function ApproachPathReplay({ runway, flightPath, referencePath }
   const [replayIndex, setReplayIndex] = useState(0)
   const [isPlaying, setIsPlaying] = useState(false)
   const [playbackSpeed, setPlaybackSpeed] = useState(2.0)
+  const [topViewZoom, setTopViewZoom] = useState(1.0)
   const animationFrameRef = useRef(null)
   const lastTimeRef = useRef(null)
   const currentTimeRef = useRef(0)
@@ -247,6 +248,37 @@ export default function ApproachPathReplay({ runway, flightPath, referencePath }
           />
           <span className="replay-speed-value">{playbackSpeed}x</span>
         </div>
+        <div className="replay-zoom-control">
+          <label className="replay-zoom-label" title="Top View Zoom">
+            🔍
+          </label>
+          <button
+            className="replay-zoom-btn"
+            onClick={() => setTopViewZoom(Math.max(0.25, topViewZoom - 0.25))}
+            title="Zoom Out"
+            type="button"
+          >
+            −
+          </button>
+          <span className="replay-zoom-value">{topViewZoom.toFixed(2)}x</span>
+          <button
+            className="replay-zoom-btn"
+            onClick={() => setTopViewZoom(Math.min(4.0, topViewZoom + 0.25))}
+            title="Zoom In"
+            type="button"
+          >
+            +
+          </button>
+          <button
+            className="replay-zoom-btn"
+            onClick={() => setTopViewZoom(1.0)}
+            title="Reset Zoom"
+            type="button"
+            style={{ marginLeft: '8px', fontSize: '12px' }}
+          >
+            ↺
+          </button>
+        </div>
         <div 
           className="replay-progress"
           ref={progressBarRef}
@@ -285,6 +317,8 @@ export default function ApproachPathReplay({ runway, flightPath, referencePath }
         selectedLandingPath={referencePath}
         replayIndex={replayIndex}
         isReplayMode={true}
+        topViewZoom={topViewZoom}
+        onTopViewDoubleClick={() => setTopViewZoom(1.0)}
       />
     </div>
   )

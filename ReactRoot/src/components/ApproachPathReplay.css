@@ -104,6 +104,55 @@
   font-family: 'Consolas', monospace;
 }
 
+.replay-zoom-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  padding: 0 12px;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+}
+
+.replay-zoom-label {
+  font-size: 16px;
+  color: var(--text);
+  cursor: default;
+}
+
+.replay-zoom-btn {
+  background: var(--border);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 4px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 600;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 28px;
+}
+
+.replay-zoom-btn:hover {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: white;
+  transform: scale(1.05);
+}
+
+.replay-zoom-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 45px;
+  text-align: center;
+  font-family: 'Consolas', monospace;
+}
+
 .replay-progress {
   flex: 1;
   height: 8px;
@@ -189,6 +238,17 @@
   }
 
   .replay-speed-control {
+    width: 100%;
+    margin-left: 0;
+    padding: var(--gap-sm) 0;
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    justify-content: space-between;
+  }
+
+  .replay-zoom-control {
     width: 100%;
     margin-left: 0;
     padding: var(--gap-sm) 0;

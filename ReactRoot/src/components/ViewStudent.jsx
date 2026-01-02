@@ -580,7 +580,7 @@ function ManeuverCard({ maneuver, customRunways }) {
                           <span className="label">Bank:</span>
                           <span className="value">
                             {(details.deviations?.maxBank >= 0 ? '+' : '') + 
-                             Math.round(details.deviations?.maxBank || 0)}° from 45°
+                             Math.round(details.deviations?.maxBank || 0)}°
                           </span>
                         </div>
                         <div className={(details.deviations?.rolloutHeadingError || 0) <= tolerances.rolloutHeading ? 'pass' : 'fail'}>
