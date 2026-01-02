@@ -2081,11 +2081,23 @@ export default function Landing({ user }) {
                 )}
 
                 {landingResult.flightPath && landingResult.flightPath.length > 0 && (
-                  <ApproachPathReplay
-                    runway={runway}
-                    flightPath={landingResult.flightPath}
-                    referencePath={selectedLandingPath ? savedLandingPaths.find(p => p.id === selectedLandingPath)?.path_data : null}
-                  />
+                  <>
+                    <ApproachPathReplay
+                      runway={runway}
+                      flightPath={landingResult.flightPath}
+                      referencePath={selectedLandingPath ? savedLandingPaths.find(p => p.id === selectedLandingPath)?.path_data : null}
+                    />
+                    <div style={{ marginTop: '24px' }}>
+                      <FlightPath3D 
+                        flightPath={landingResult.flightPath}
+                        entry={landingResult.flightPath[0]}
+                        referencePath={selectedLandingPath ? savedLandingPaths.find(p => p.id === selectedLandingPath)?.path_data : null}
+                        runway={runway}
+                        runwayName={getRunwayDisplayName(selectedRunway, customRunways)}
+                        maneuverType="landing"
+                      />
+                    </div>
+                  </>
                 )}
 
                 <button className="big-button reset" onClick={reset}>
