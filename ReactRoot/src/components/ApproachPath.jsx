@@ -93,11 +93,19 @@ export default function ApproachPath({
 
     const bearingToCanvasRad = (bearingDeg) => ((bearingDeg - 90) * Math.PI) / 180
 
+    // Rotate the entire top-view so the approach comes from top -> bottom.
+    // If runway.heading is the landing direction toward the threshold, then the approach side (threshold -> aircraft on final)
+    // is roughly (runway.heading + 180). We rotate so that direction points "up" on screen.
+    const approachSideBearing = (runway.heading + 180) % 360
+    const viewRotationRad = (-approachSideBearing * Math.PI) / 180
+
+    const bearingToScreenRad = (bearingDeg) => bearingToCanvasRad(bearingDeg) + viewRotationRad
+
     const offsetFromThreshold = (lat, lon) => {
       if (lat == null || lon == null) return null
       const distNm = calculateDistance(thresholdLat, thresholdLon, lat, lon)
       const bearing = calculateBearing(thresholdLat, thresholdLon, lat, lon)
-      const ang = bearingToCanvasRad(bearing)
+      const ang = bearingToScreenRad(bearing)
       return {
         distNm,
         bearing,
@@ -110,7 +118,7 @@ export default function ApproachPath({
       if (lat == null || lon == null || dataToUse?.lat == null || dataToUse?.lon == null) return null
       const distNm = calculateDistance(dataToUse.lat, dataToUse.lon, lat, lon)
       const bearing = calculateBearing(dataToUse.lat, dataToUse.lon, lat, lon)
-      const ang = bearingToCanvasRad(bearing)
+      const ang = bearingToScreenRad(bearing)
       return {
         distNm,
         bearing,
@@ -156,7 +164,7 @@ export default function ApproachPath({
 
     // Axis direction from threshold toward the opposite end
     const runwayAxisBearing = (runway.heading + 180) % 360
-    const runwayAxisRad = bearingToCanvasRad(runwayAxisBearing)
+    const runwayAxisRad = bearingToCanvasRad(runwayAxisBearing) + viewRotationRad
 
     ctx.save()
     ctx.translate(runwayX, runwayY)
@@ -212,15 +220,16 @@ export default function ApproachPath({
     if (selectedLandingPath && selectedLandingPath.length > 3) {
       const referencePoints = []
       
-      // Calculate all points relative to runway threshold (north-up)
+      // Calculate all points relative to aircraft (camera follow, north-up)
       selectedLandingPath.forEach((point) => {
-        const off = offsetFromThreshold(point.lat, point.lon)
+        const off = offsetFromAircraft(point.lat, point.lon)
         if (!off) return
-        if (off.distNm <= 20) {
+        const distToThreshold = calculateDistance(point.lat, point.lon, thresholdLat, thresholdLon)
+        if (distToThreshold <= 20) {
           referencePoints.push({
-            x: runwayX + off.dx,
-            y: runwayY + off.dy,
-            distToThreshold: off.distNm
+            x: aircraftOriginX + off.dx,
+            y: aircraftOriginY + off.dy,
+            distToThreshold
           })
         }
       })
@@ -433,8 +442,9 @@ export default function ApproachPath({
       ctx.translate(aircraftX, aircraftY)
       // Icon is drawn pointing UP (nose at -Y).
       // Rotate to match aircraft heading (0° = North = up)
-      const headingRad = (dataToUse.hdg_true || 0) * Math.PI / 180
-      ctx.rotate(headingRad)
+      const headingRad = ((dataToUse.hdg_true || 0) * Math.PI) / 180
+      // Apply the same camera rotation so the icon matches the rotated view.
+      ctx.rotate(headingRad + viewRotationRad)
       
       // Draw aircraft icon
       ctx.fillStyle = '#ffff00'
@@ -474,7 +484,9 @@ export default function ApproachPath({
     
     // Show runway info if within view
     if (aircraftDistance != null && aircraftDistance <= 15) {
-      ctx.fillText(`RWY ${runway.heading}°`, centerX - 30, height - 10)
+      // Remove last digit from runway heading (e.g., 09 → 9, 27 → 2)
+      const runwayNumber = Math.floor(runway.heading / 10)
+      ctx.fillText(`RWY ${runwayNumber}`, centerX - 30, height - 10)
     }
     
     // Compass rose (top right)
@@ -497,11 +509,12 @@ export default function ApproachPath({
     
     // Current heading indicator
     if (dataToUse && dataToUse.hdg_true != null) {
-      const headingRad = (dataToUse.hdg_true - 90) * Math.PI / 180
+      const headingRad = ((dataToUse.hdg_true || 0) * Math.PI) / 180
       ctx.strokeStyle = '#ffff00'
       ctx.lineWidth = 2
       ctx.beginPath()
       ctx.moveTo(0, 0)
+      // Heading 0 = north (up)
       ctx.lineTo(Math.sin(headingRad) * 15, -Math.cos(headingRad) * 15)
       ctx.stroke()
     }
