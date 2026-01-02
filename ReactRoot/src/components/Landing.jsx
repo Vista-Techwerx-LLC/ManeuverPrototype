@@ -179,6 +179,7 @@ export default function Landing({ user }) {
   const dropdownRef = useRef(null)
   const pathDropdownRef = useRef(null)
   const startTrackingRef = useRef(() => {})
+  const stopTrackingRef = useRef(() => {})
   const autoStartTriggered = useRef(false)
   const [autoStartEnabled, setAutoStartEnabled] = useState(true)
   const [autoStartSkillLevel, setAutoStartSkillLevel] = useState(SKILL_LEVELS.ACS)
@@ -716,6 +717,22 @@ export default function Landing({ user }) {
   }, [startTracking])
 
   useEffect(() => {
+    stopTrackingRef.current = stopTracking
+  }, [stopTracking])
+
+  useEffect(() => {
+    if (!tracking || state !== 'tracking') return
+    if (!data) return
+    const speed = data.ias_kt ?? data.ias
+    if (speed == null) return
+    const threshold = (vref || 0) - 10
+    if (speed < threshold) {
+      console.log('Stopping tracking: indicated airspeed dropped below Vref - 10 kt')
+      stopTrackingRef.current()
+    }
+  }, [tracking, state, data, vref])
+
+  useEffect(() => {
     if (!tracking) {
       autoStartTriggered.current = false
     }
@@ -781,7 +798,7 @@ export default function Landing({ user }) {
       completePathFollowing()
     } else {
       setTracking(false)
-      setState('ready')
+      setState(connected ? 'ready' : 'disconnected')
       setCurrentPhase(LANDING_PHASES.NONE)
       setNearRunwayButNotPath(false)
     }
@@ -1200,7 +1217,7 @@ export default function Landing({ user }) {
 
   function reset() {
     setTracking(false)
-    setState('ready')
+    setState(connected ? 'ready' : 'disconnected')
     setCurrentPhase(LANDING_PHASES.NONE)
     setPhaseHistory([])
     setFlightPath([])
@@ -1468,16 +1485,28 @@ export default function Landing({ user }) {
           {/* Left Column: Controls and Configuration */}
           <div className="left-col">
             <div className={`card ${dropdownOpen ? 'dropdown-active' : ''}`}>
-              <div className={`status-badge ${state}`}>
-                ● {state === 'disconnected' ? 'Disconnected' : 
+              <div className={`status-badge ${!connected || !data ? 'disconnected' : state}`}>
+                ● {!connected || !data ? 'Disconnected' : 
                    state === 'ready' ? 'Ready' : 
                    state === 'tracking' ? `Tracking - ${phaseStandards?.name || 'Monitoring'}` : 
                    'Complete'}
               </div>
 
+              {(!connected || !data) && (
+                <div style={{ 
+                  padding: '8px', 
+                  backgroundColor: '#ff444420', 
+                  borderRadius: '4px', 
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  color: '#ff4444'
+                }}>
+                  ⚠️ Bridge not connected. Start your bridge client to begin tracking.
+                </div>
+              )}
               <button
                 className={`big-button ${tracking ? 'stop' : 'start'}`}
-                disabled={state === 'disconnected' || state === 'complete' || recordingPath}
+                disabled={!connected || !data || state === 'disconnected' || state === 'complete' || recordingPath}
                 onClick={tracking ? stopTracking : startTracking}
               >
                 {tracking ? 'Stop Tracking' : 'Start Tracking'}
@@ -1636,9 +1665,12 @@ export default function Landing({ user }) {
                 </label>
 
                 <AutoStart
-                  enabled={autoStartEnabled}
+                  enabled={autoStartEnabled && connected && data}
                   skillLevel={autoStartSkillLevel}
-                  onToggle={(enabled) => setAutoStartEnabled(enabled)}
+                  onToggle={(enabled) => {
+                    if (!connected || !data) return
+                    setAutoStartEnabled(enabled)
+                  }}
                   onSkillLevelChange={setAutoStartSkillLevel}
                   status={autoStartStatus}
                   maneuverType={MANEUVER_TYPES.LANDING}
@@ -2125,7 +2157,7 @@ export default function Landing({ user }) {
                   <ul className="phases-list">
                     <li><strong>Downwind:</strong> {JKA_AIRPORT.patternAltitude} ft, Vref+20 kt</li>
                     <li><strong>Base:</strong> 800-900 ft, Vref+15 kt, 400-800 fpm descent</li>
-                    <li><strong>Final:</strong> On glidepath, Vref to Vref+20 kt, stabilized by 500 AGL</li>
+                    <li><strong>Final:</strong> On glidepath, Vref to Vref+10 kt, stabilized by 500 AGL</li>
                     <li><strong>Threshold:</strong> 30-60 ft AGL crossing, Vref ±5 kt</li>
                     <li><strong>Touchdown:</strong> 500-1500 ft past threshold, ≤360 fpm</li>
                   </ul>

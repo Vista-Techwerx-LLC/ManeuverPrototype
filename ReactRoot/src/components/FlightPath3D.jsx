@@ -611,6 +611,119 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
         const refLine = new THREE.Line(refLineGeometry, refLineMaterial)
         referencePathGroup.add(refLine)
         
+        // Add side borders to the reference path (where the plane should be)
+        const corridorWidthMeters = 0.15 * 1852 // 0.15 NM in meters
+        const borderRadius = 8
+        
+        // Create left and right border paths based on reference path
+        const leftBorderPoints = []
+        const rightBorderPoints = []
+        
+        for (let i = 0; i < refPathPoints.length; i++) {
+          const currentPoint = refPathPoints[i]
+          let direction = new THREE.Vector3()
+          
+          if (i === 0 && refPathPoints.length > 1) {
+            // First point: use direction to next point
+            direction = refPathPoints[i + 1].clone().sub(currentPoint).normalize()
+          } else if (i === refPathPoints.length - 1 && refPathPoints.length > 1) {
+            // Last point: use direction from previous point
+            direction = currentPoint.clone().sub(refPathPoints[i - 1]).normalize()
+          } else if (refPathPoints.length > 1) {
+            // Middle points: use average direction from prev to next
+            const prevDir = currentPoint.clone().sub(refPathPoints[i - 1]).normalize()
+            const nextDir = refPathPoints[i + 1].clone().sub(currentPoint).normalize()
+            direction = prevDir.add(nextDir).normalize()
+          } else {
+            continue
+          }
+          
+          // Calculate perpendicular vector (horizontal plane only, ignoring altitude)
+          const horizontalDir = new THREE.Vector3(direction.x, 0, direction.z).normalize()
+          const perpendicular = new THREE.Vector3(-horizontalDir.z, 0, horizontalDir.x).normalize()
+          
+          // Create left and right border points
+          const leftPoint = currentPoint.clone().add(perpendicular.clone().multiplyScalar(corridorWidthMeters))
+          const rightPoint = currentPoint.clone().add(perpendicular.clone().multiplyScalar(-corridorWidthMeters))
+          
+          leftBorderPoints.push(leftPoint)
+          rightBorderPoints.push(rightPoint)
+        }
+        
+        // Create left border tube
+        if (leftBorderPoints.length >= 2) {
+          try {
+            const leftCurve = new THREE.CatmullRomCurve3(leftBorderPoints, false, 'centripetal')
+            const leftGeometry = new THREE.TubeGeometry(leftCurve, Math.max(leftBorderPoints.length * 2, 10), borderRadius, 8, false)
+            const leftMaterial = new THREE.MeshStandardMaterial({
+              color: 0xffa500,
+              emissive: 0xaa5500,
+              emissiveIntensity: 0.3,
+              metalness: 0.1,
+              roughness: 0.7,
+              transparent: true,
+              opacity: 0.6
+            })
+            const leftBorder = new THREE.Mesh(leftGeometry, leftMaterial)
+            leftBorder.castShadow = false
+            referencePathGroup.add(leftBorder)
+            
+            // Add dashed line for better visibility
+            const leftLineGeometry = new THREE.BufferGeometry().setFromPoints(leftBorderPoints)
+            leftLineGeometry.computeLineDistances()
+            const leftLineMaterial = new THREE.LineDashedMaterial({
+              color: 0xffa500,
+              linewidth: 2,
+              transparent: true,
+              opacity: 0.5,
+              dashSize: 20,
+              gapSize: 10
+            })
+            const leftLine = new THREE.Line(leftLineGeometry, leftLineMaterial)
+            leftLine.computeLineDistances()
+            referencePathGroup.add(leftLine)
+          } catch (error) {
+            console.warn('Error creating left border:', error)
+          }
+        }
+        
+        // Create right border tube
+        if (rightBorderPoints.length >= 2) {
+          try {
+            const rightCurve = new THREE.CatmullRomCurve3(rightBorderPoints, false, 'centripetal')
+            const rightGeometry = new THREE.TubeGeometry(rightCurve, Math.max(rightBorderPoints.length * 2, 10), borderRadius, 8, false)
+            const rightMaterial = new THREE.MeshStandardMaterial({
+              color: 0xffa500,
+              emissive: 0xaa5500,
+              emissiveIntensity: 0.3,
+              metalness: 0.1,
+              roughness: 0.7,
+              transparent: true,
+              opacity: 0.6
+            })
+            const rightBorder = new THREE.Mesh(rightGeometry, rightMaterial)
+            rightBorder.castShadow = false
+            referencePathGroup.add(rightBorder)
+            
+            // Add dashed line for better visibility
+            const rightLineGeometry = new THREE.BufferGeometry().setFromPoints(rightBorderPoints)
+            rightLineGeometry.computeLineDistances()
+            const rightLineMaterial = new THREE.LineDashedMaterial({
+              color: 0xffa500,
+              linewidth: 2,
+              transparent: true,
+              opacity: 0.5,
+              dashSize: 20,
+              gapSize: 10
+            })
+            const rightLine = new THREE.Line(rightLineGeometry, rightLineMaterial)
+            rightLine.computeLineDistances()
+            referencePathGroup.add(rightLine)
+          } catch (error) {
+            console.warn('Error creating right border:', error)
+          }
+        }
+        
         scene.add(referencePathGroup)
       }
     }
@@ -1189,7 +1302,6 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
           // Positive bank = right wing down, which in Three.js is positive Z rotation
           planeGroup.rotateZ(bank * Math.PI / 180)
           
-          if (frameCount % 2 === 0) {
           const interpolatedData = {
               lat: THREE.MathUtils.lerp(currentPathData.lat, nextPathData.lat, t),
               lon: THREE.MathUtils.lerp(currentPathData.lon, nextPathData.lon, t),
@@ -1200,7 +1312,6 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
             pitch: pitch
           }
           setCurrentData(interpolatedData)
-          }
           
           // Optimized camera following with smoother interpolation
           // Use same distance calculation as initial camera position for consistency
@@ -1228,12 +1339,31 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
           }
         }
       } else if (!isPlayingRef.current && pathData.length > 0) {
-        // When paused, only update if we're at a different index to prevent flickering
+        // When paused, update currentData based on animation progress
         const progress = Math.max(0, Math.min(1, animationProgress))
-        const pathIndex = Math.round(progress * (pathData.length - 1))
-        if (pathIndex !== lastPausedIndexRef.current && pathData[pathIndex]) {
+        const exactIndex = progress * (pathData.length - 1)
+        const pathIndex = Math.floor(exactIndex)
+        const nextIndex = Math.min(pathIndex + 1, pathData.length - 1)
+        const t = exactIndex % 1
+        
+        const currentPathData = pathData[pathIndex]
+        const nextPathData = pathData[nextIndex]
+        
+        if (currentPathData && nextPathData) {
+          const pausedData = {
+            lat: THREE.MathUtils.lerp(currentPathData.lat, nextPathData.lat, t),
+            lon: THREE.MathUtils.lerp(currentPathData.lon, nextPathData.lon, t),
+            alt: THREE.MathUtils.lerp(currentPathData.alt, nextPathData.alt, t),
+            bank: THREE.MathUtils.lerp(currentPathData.bank, nextPathData.bank, t),
+            heading: THREE.MathUtils.lerp(currentPathData.heading, nextPathData.heading, t),
+            airspeed: THREE.MathUtils.lerp(currentPathData.airspeed, nextPathData.airspeed, t),
+            pitch: THREE.MathUtils.lerp(currentPathData.pitch, nextPathData.pitch, t)
+          }
+          setCurrentData(pausedData)
           lastPausedIndexRef.current = pathIndex
-          setCurrentData(pathData[pathIndex])
+        } else if (currentPathData) {
+          setCurrentData(currentPathData)
+          lastPausedIndexRef.current = pathIndex
         }
       }
       
@@ -1449,11 +1579,12 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
 
   const calculateGlidepathDeviation = () => {
     if (!currentData || !runway?.threshold) {
-      return currentData ? currentData.alt - originAltRef.current : 0
+      return 0
     }
     if (currentData.lat == null || currentData.lon == null) {
-      return currentData.alt - originAltRef.current
+      return 0
     }
+    const currentAlt = currentData.alt
     const R = 6371
     const dLat = (runway.threshold.lat - currentData.lat) * Math.PI / 180
     const dLon = (runway.threshold.lon - currentData.lon) * Math.PI / 180
@@ -1463,7 +1594,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     const distanceNM = R * c * 0.539957
     const targetAlt = GLIDEPATH.getTargetAltitude(distanceNM)
-    return currentData.alt - targetAlt.msl
+    return currentAlt - targetAlt.msl
   }
   const altitudeDeviation = calculateGlidepathDeviation()
   const altitudeGuideClass = currentData ? getAltitudeGuideClass(altitudeDeviation) : ''

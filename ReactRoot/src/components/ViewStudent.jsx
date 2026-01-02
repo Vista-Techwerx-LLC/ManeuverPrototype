@@ -634,6 +634,8 @@ function ManeuverCard({ maneuver, customRunways }) {
                   <FlightPath3D 
                     flightPath={details.flightPath} 
                     entry={details.entry}
+                    runway={replayRunway}
+                    referencePath={details.referencePath}
                   />
                 </div>
               )}

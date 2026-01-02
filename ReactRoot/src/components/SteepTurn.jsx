@@ -635,7 +635,7 @@ export default function SteepTurn({ user }) {
 
   function cancelTracking() {
     setEntry(null)
-    setState('ready')
+    setState(connected ? 'ready' : 'disconnected')
     rolloutStartTimeRef.current = null
     rolloutLevelStartRef.current = null
     setAiFeedback('')
@@ -679,7 +679,7 @@ export default function SteepTurn({ user }) {
 
   function reset() {
     setEntry(null)
-    setState('ready')
+    setState(connected ? 'ready' : 'disconnected')
     rolloutStartTimeRef.current = null
     rolloutLevelStartRef.current = null
     setAiFeedback('')
@@ -969,25 +969,40 @@ export default function SteepTurn({ user }) {
         <div className="steep-turn-grid">
           <div className="left-col">
             <div className="card">
-              <div className={`status-badge ${state}`}>
-                ● {state === 'disconnected' ? 'Disconnected' : 
+              <div className={`status-badge ${!connected || !data ? 'disconnected' : state}`}>
+                ● {!connected || !data ? 'Disconnected' : 
                    state === 'ready' ? 'Ready' : 
                    state === 'tracking' ? 'Tracking Turn' :
                    state === 'rollout' ? 'Tracking Rollout' : 'Complete'}
               </div>
 
+              {(!connected || !data) && (
+                <div style={{ 
+                  padding: '8px', 
+                  backgroundColor: '#ff444420', 
+                  borderRadius: '4px', 
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  color: '#ff4444'
+                }}>
+                  ⚠️ Bridge not connected. Start your bridge client to begin tracking.
+                </div>
+              )}
               <button
                 className={`big-button ${(state === 'tracking' || state === 'rollout') ? 'stop' : 'start'}`}
-                disabled={state === 'disconnected' || state === 'complete'}
+                disabled={!connected || !data || state === 'disconnected' || state === 'complete'}
                 onClick={handleStartClick}
               >
                 {(state === 'tracking' || state === 'rollout') ? 'Cancel' : 'Start Tracking'}
               </button>
 
               <AutoStart
-                enabled={autoStartEnabled}
+                enabled={autoStartEnabled && connected && data}
                 skillLevel={autoStartSkillLevel}
-                onToggle={setAutoStartEnabled}
+                onToggle={(value) => {
+                  if (!connected || !data) return
+                  setAutoStartEnabled(value)
+                }}
                 onSkillLevelChange={setAutoStartSkillLevel}
                 status={autoStartStatus}
                 maneuverType={MANEUVER_TYPES.STEEP_TURN}

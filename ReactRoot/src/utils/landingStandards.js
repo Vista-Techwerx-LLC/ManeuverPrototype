@@ -211,7 +211,7 @@ export const PHASE_STANDARDS = {
       tolerance: 100
     },
     airspeed: {
-      target: 'Vref+20',
+      target: 'Vref+10',
       tolerance: 5
     },
     bankAngle: {

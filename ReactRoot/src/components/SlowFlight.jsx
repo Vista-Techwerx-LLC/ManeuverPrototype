@@ -240,7 +240,7 @@ export default function SlowFlight({ user }) {
     setEntry(null)
     setStartTime(null)
     setElapsedTime(0)
-    setState('ready')
+    setState(connected ? 'ready' : 'disconnected')
     setTracking({
       maxAltDev: 0,
       maxSpdDev: 0,
@@ -296,7 +296,7 @@ export default function SlowFlight({ user }) {
     setEntry(null)
     setStartTime(null)
     setElapsedTime(0)
-    setState('ready')
+    setState(connected ? 'ready' : 'disconnected')
     setTracking({
       maxAltDev: 0,
       maxSpdDev: 0,
@@ -378,24 +378,39 @@ export default function SlowFlight({ user }) {
         <div className="slow-flight-grid">
           <div className="left-col">
             <div className="card">
-              <div className={`status-badge ${state}`}>
-                ● {state === 'disconnected' ? 'Disconnected' : 
+              <div className={`status-badge ${!connected || !data ? 'disconnected' : state}`}>
+                ● {!connected || !data ? 'Disconnected' : 
                    state === 'ready' ? 'Ready' : 
                    state === 'tracking' ? 'Tracking' : 'Complete'}
               </div>
 
+              {(!connected || !data) && (
+                <div style={{ 
+                  padding: '8px', 
+                  backgroundColor: '#ff444420', 
+                  borderRadius: '4px', 
+                  marginBottom: '8px',
+                  fontSize: '12px',
+                  color: '#ff4444'
+                }}>
+                  ⚠️ Bridge not connected. Start your bridge client to begin tracking.
+                </div>
+              )}
               <button
                 className={`big-button ${state === 'tracking' ? 'stop' : 'start'}`}
-                disabled={state === 'disconnected' || state === 'complete'}
+                disabled={!connected || !data || state === 'disconnected' || state === 'complete'}
                 onClick={handleStartClick}
               >
                 {state === 'tracking' ? 'Cancel' : 'Start Tracking'}
               </button>
 
               <AutoStart
-                enabled={autoStartEnabled}
+                enabled={autoStartEnabled && connected && data}
                 skillLevel={autoStartSkillLevel}
-                onToggle={setAutoStartEnabled}
+                onToggle={(value) => {
+                  if (!connected || !data) return
+                  setAutoStartEnabled(value)
+                }}
                 onSkillLevelChange={setAutoStartSkillLevel}
                 status={autoStartStatus}
                 maneuverType={MANEUVER_TYPES.SLOW_FLIGHT}

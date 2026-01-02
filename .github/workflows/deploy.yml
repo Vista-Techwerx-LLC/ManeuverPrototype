@@ -39,6 +39,8 @@ jobs:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_CLOUD_WS_URL: ${{ secrets.VITE_CLOUD_WS_URL }}
+          VITE_OPENAI_API_KEY: ${{ secrets.VITE_OPENAI_API_KEY }}
+          VITE_OPENAI_MODEL: ${{ secrets.VITE_OPENAI_MODEL }}
           GITHUB_PAGES: 'true'
         run: npm run build
 
