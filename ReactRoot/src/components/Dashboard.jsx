@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useWebSocket } from '../hooks/useWebSocket'
+import { getBridgeDownloadUrl } from '../utils/storage'
 import './Dashboard.css'
 import './Telemetry.css'
 
@@ -9,6 +10,8 @@ export default function Dashboard({ user }) {
   const [sessionId, setSessionId] = useState('')
   const [loading, setLoading] = useState(true)
   const [isSetupCollapsed, setIsSetupCollapsed] = useState(false)
+  const [bridgeDownloadUrl, setBridgeDownloadUrl] = useState(null)
+  const [downloading, setDownloading] = useState(false)
   const { connected, data } = useWebSocket(user.id)
   const worldRef = useRef(null)
 
@@ -54,6 +57,16 @@ export default function Dashboard({ user }) {
   }, [user])
 
   useEffect(() => {
+    // Get the download URL for MSFS-Bridge.exe
+    const fetchDownloadUrl = async () => {
+      const url = await getBridgeDownloadUrl()
+      setBridgeDownloadUrl(url)
+    }
+    
+    fetchDownloadUrl()
+  }, [])
+
+  useEffect(() => {
     if (data && worldRef.current) {
       requestAnimationFrame(() => {
         if (worldRef.current) {
@@ -72,6 +85,30 @@ export default function Dashboard({ user }) {
   const fmt = (n, digits = 1) => {
     if (n === null || n === undefined || Number.isNaN(n)) return "—"
     return Number(n).toFixed(digits)
+  }
+
+  const handleDownloadBridge = async () => {
+    if (!bridgeDownloadUrl) {
+      console.error('Download URL not available')
+      return
+    }
+
+    setDownloading(true)
+    try {
+      // Create a temporary anchor element to trigger download
+      const link = document.createElement('a')
+      link.href = bridgeDownloadUrl
+      link.download = 'MSFS-Bridge.exe'
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } catch (error) {
+      console.error('Error downloading file:', error)
+      // Fallback: open in new tab
+      window.open(bridgeDownloadUrl, '_blank')
+    } finally {
+      setDownloading(false)
+    }
   }
 
   if (loading) {
@@ -104,7 +141,20 @@ export default function Dashboard({ user }) {
             <div className={`setup-instructions-content ${isSetupCollapsed ? 'collapsed' : ''}`}>
               <ol className="setup-steps">
                 <li>
-                  <strong>Download the Bridge:</strong> Get <code>MSFS-Bridge.exe</code> from the releases page
+                  <strong>Download the Bridge:</strong> 
+                  {bridgeDownloadUrl ? (
+                    <button 
+                      onClick={handleDownloadBridge}
+                      disabled={downloading}
+                      className="download-bridge-btn"
+                    >
+                      {downloading ? '⏳ Downloading...' : '⬇ Download MSFS-Bridge.exe'}
+                    </button>
+                  ) : (
+                    <span className="download-placeholder">
+                      (Download link will appear here)
+                    </span>
+                  )}
                 </li>
                 <li>
                   <strong>Run the bridge:</strong> Double-click <code>MSFS-Bridge.exe</code>

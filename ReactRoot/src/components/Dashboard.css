@@ -275,6 +275,36 @@
   color: var(--text-muted);
 }
 
+.download-bridge-btn {
+  margin-left: 12px;
+  padding: 8px 16px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  cursor: pointer;
+  font-size: var(--font-size-small);
+  font-weight: 600;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.download-bridge-btn:hover:not(:disabled) {
+  background: var(--accent-bright);
+  transform: translateY(-1px);
+}
+
+.download-bridge-btn:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.download-placeholder {
+  margin-left: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 @media (max-width: 1024px) {
   .setup-steps {
     grid-template-columns: 1fr;
