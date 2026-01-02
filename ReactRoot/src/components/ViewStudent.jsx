@@ -39,8 +39,11 @@ async function loadCustomRunways(user) {
       return []
     }
 
-    // Convert database runways to format expected by the app
-    return dbRunways?.map(r => r.runway_data) || []
+    return dbRunways?.map(r => ({
+      ...r.runway_data,
+      id: r.runway_data?.id || `db_${r.user_id}_${r.runway_name}`,
+      name: r.runway_data?.name || r.runway_name
+    })) || []
   } catch (error) {
     console.error('Error loading custom runways:', error)
     return []

@@ -57,11 +57,14 @@ export async function loadCustomRunways(user = null) {
             const mergedRunways = [...localRunways]
             dbRunwaysFormatted.forEach(dbRwy => {
               // Check if already exists (by name or id)
-              const exists = mergedRunways.some(localRwy => 
+              const existingIndex = mergedRunways.findIndex(localRwy => 
                 localRwy.id === dbRwy.id || 
                 (localRwy.name === dbRwy.name && localRwy.threshold?.lat === dbRwy.threshold?.lat)
               )
-              if (!exists) {
+              if (existingIndex >= 0) {
+                // Replace localStorage version with database version (has fromDatabase flag)
+                mergedRunways[existingIndex] = dbRwy
+              } else {
                 mergedRunways.push(dbRwy)
               }
             })
@@ -108,12 +111,12 @@ async function saveRunwayToDatabase(userId, runwayData) {
     
     if (error) {
       console.error('Error saving runway to database:', error)
-      return false
+      return { ok: false, error }
     }
-    return true
+    return { ok: true, error: null }
   } catch (error) {
     console.error('Error saving runway to database:', error)
-    return false
+    return { ok: false, error }
   }
 }
 
@@ -227,49 +230,58 @@ export default function RunwayCalibration({ user, onComplete, onCancel }) {
       return
     }
 
-    // Calculate actual runway length and heading
-    const distanceNM = calculateDistance(
-      threshold.lat, threshold.lon,
-      oppositeEnd.lat, oppositeEnd.lon
-    )
-    const distanceFeet = distanceNM * 6076
-    const calculatedHeading = calculateBearing(
-      threshold.lat, threshold.lon,
-      oppositeEnd.lat, oppositeEnd.lon
-    )
+    try {
+      const distanceNM = calculateDistance(
+        threshold.lat, threshold.lon,
+        oppositeEnd.lat, oppositeEnd.lon
+      )
+      const distanceFeet = distanceNM * 6076
+      const calculatedHeading = calculateBearing(
+        threshold.lat, threshold.lon,
+        oppositeEnd.lat, oppositeEnd.lon
+      )
 
-    const runwayData = {
-      id: `custom_${Date.now()}`,
-      name: runwayName.trim(),
-      heading: parseFloat(runwayHeading),
-      calculatedHeading: Math.round(calculatedHeading),
-      threshold: {
-        lat: threshold.lat,
-        lon: threshold.lon,
-        elevation: threshold.elevation
-      },
-      oppositeEnd: {
-        lat: oppositeEnd.lat,
-        lon: oppositeEnd.lon,
-        elevation: oppositeEnd.elevation
-      },
-      length: Math.round(distanceFeet),
-      width: 100, // Default, can be updated later
-      createdAt: new Date().toISOString()
-    }
+      const runwayData = {
+        id: `custom_${Date.now()}`,
+        name: runwayName.trim(),
+        heading: parseFloat(runwayHeading),
+        calculatedHeading: Math.round(calculatedHeading),
+        threshold: {
+          lat: threshold.lat,
+          lon: threshold.lon,
+          elevation: threshold.elevation
+        },
+        oppositeEnd: {
+          lat: oppositeEnd.lat,
+          lon: oppositeEnd.lon,
+          elevation: oppositeEnd.elevation
+        },
+        length: Math.round(distanceFeet),
+        width: 100,
+        createdAt: new Date().toISOString()
+      }
 
-    // Save to localStorage
-    const customRunways = loadCustomRunways()
-    customRunways.push(runwayData)
-    saveCustomRunways(customRunways)
+      const stored = localStorage.getItem(STORAGE_KEY)
+      const customRunways = stored ? JSON.parse(stored) : []
+      customRunways.push(runwayData)
+      const savedLocal = saveCustomRunways(customRunways)
+      if (!savedLocal) {
+        alert('Unable to save runway locally (localStorage error)')
+        return
+      }
 
-    // Save to Supabase (optional)
-    if (user) {
-      await saveRunwayToDatabase(user.id, runwayData)
-    }
+      if (user) {
+        const result = await saveRunwayToDatabase(user.id, runwayData)
+        if (!result.ok) {
+          alert(result.error?.message || 'Unable to save runway to Supabase')
+        }
+      }
 
-    if (onComplete) {
-      onComplete(runwayData)
+      if (onComplete) {
+        onComplete(runwayData)
+      }
+    } catch (e) {
+      alert(e?.message || 'Unable to save runway')
     }
   }
 

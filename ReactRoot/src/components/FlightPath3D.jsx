@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import * as THREE from 'three'
 import './FlightPath3D.css'
 import { GLIDEPATH } from '../utils/landingStandards'
@@ -20,7 +20,7 @@ const getBankGuideClass = (bank) => {
 // Track component instances
 let instanceCounter = 0
 
-export default function FlightPath3D({ flightPath, entry, referencePath, runway, runwayName }) {
+export default function FlightPath3D({ flightPath, entry, referencePath, runway, runwayName, maneuverType }) {
   const instanceId = useRef(++instanceCounter)
   const containerRef = useRef(null)
   const sceneRef = useRef(null)
@@ -39,6 +39,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
   const [animationProgress, setAnimationProgress] = useState(0)
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
   const [currentData, setCurrentData] = useState(null)
+  const [altitudeDeviation, setAltitudeDeviation] = useState(0)
   const animationTimeRef = useRef(0)
   const pointSpheresRef = useRef([])
   const originAltRef = useRef(0)
@@ -53,6 +54,42 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
   useEffect(() => {
     playbackSpeedRef.current = playbackSpeed
   }, [playbackSpeed])
+
+  useEffect(() => {
+    if (!currentData) {
+      setAltitudeDeviation(0)
+      return
+    }
+
+    if (maneuverType === 'landing' || maneuverType === 'path_following') {
+      if (!runway?.threshold || currentData.lat == null || currentData.lon == null || currentData.alt == null) {
+        setAltitudeDeviation(0)
+        return
+      }
+      const currentAlt = currentData.alt
+      const R = 6371
+      const dLat = (runway.threshold.lat - currentData.lat) * Math.PI / 180
+      const dLon = (runway.threshold.lon - currentData.lon) * Math.PI / 180
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(currentData.lat * Math.PI / 180) * Math.cos(runway.threshold.lat * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2)
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+      const distanceNM = R * c * 0.539957
+      const targetAlt = GLIDEPATH.getTargetAltitude(distanceNM)
+      if (!targetAlt || targetAlt.msl == null) {
+        setAltitudeDeviation(0)
+        return
+      }
+      setAltitudeDeviation(currentAlt - targetAlt.msl)
+    } else {
+      const entryAlt = entry?.altitude || entry?.alt
+      if (entryAlt == null || currentData.alt == null) {
+        setAltitudeDeviation(0)
+        return
+      }
+      setAltitudeDeviation(currentData.alt - entryAlt)
+    }
+  }, [currentData, runway, entry, maneuverType])
 
   useEffect(() => {
     if (!containerRef.current || !flightPath || flightPath.length === 0) {
@@ -1577,26 +1614,6 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     seekToProgress(progress)
   }
 
-  const calculateGlidepathDeviation = () => {
-    if (!currentData || !runway?.threshold) {
-      return 0
-    }
-    if (currentData.lat == null || currentData.lon == null) {
-      return 0
-    }
-    const currentAlt = currentData.alt
-    const R = 6371
-    const dLat = (runway.threshold.lat - currentData.lat) * Math.PI / 180
-    const dLon = (runway.threshold.lon - currentData.lon) * Math.PI / 180
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(currentData.lat * Math.PI / 180) * Math.cos(runway.threshold.lat * Math.PI / 180) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2)
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    const distanceNM = R * c * 0.539957
-    const targetAlt = GLIDEPATH.getTargetAltitude(distanceNM)
-    return currentAlt - targetAlt.msl
-  }
-  const altitudeDeviation = calculateGlidepathDeviation()
   const altitudeGuideClass = currentData ? getAltitudeGuideClass(altitudeDeviation) : ''
   const bankGuideClass = currentData ? getBankGuideClass(currentData.bank) : ''
 
@@ -1678,46 +1695,73 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
           )}
         </div>
         <div className="flight-path-3d-legend">
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#00ffff' }}></span>
-            <span>Level Flight (Pre-entry)</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#00ffff', borderRadius: '50%' }}></span>
-            <span>Entry Point (Bank buildup)</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#10121c', borderRadius: '2px', border: '1px solid rgba(255,255,255,0.1)' }}></span>
-            <span>Runway Surface</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#ffffff' }}></span>
-            <span>Runway Centerline</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#4ad3ff' }}></span>
-            <span>Glidepath Target</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#ff4444', borderRadius: '50%' }}></span>
-            <span>Threshold Marker</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#ffc24d', borderRadius: '50%' }}></span>
-            <span>Touchdown Point</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#00ff00' }}></span>
-            <span>Altitude Acceptable (±100ft)</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#ffff00' }}></span>
-            <span>Altitude Warning (±150ft)</span>
-          </div>
-          <div className="legend-item">
-            <span className="legend-color" style={{ background: '#ff0000' }}></span>
-            <span>Altitude Busted</span>
-          </div>
+          {(maneuverType === 'landing' || maneuverType === 'path_following') ? (
+            <>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#10121c', borderRadius: '2px', border: '1px solid rgba(255,255,255,0.1)' }}></span>
+                <span>Runway Surface</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ffffff' }}></span>
+                <span>Runway Centerline</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#4ad3ff' }}></span>
+                <span>Glidepath Target</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ff4444', borderRadius: '50%' }}></span>
+                <span>Threshold Marker</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ffc24d', borderRadius: '50%' }}></span>
+                <span>Touchdown Point</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#00ff00' }}></span>
+                <span>Altitude Acceptable</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ffff00' }}></span>
+                <span>Altitude Warning</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ff0000' }}></span>
+                <span>Altitude Busted</span>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#00ffff' }}></span>
+                <span>Level Flight (Pre-entry)</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#00ffff', borderRadius: '50%' }}></span>
+                <span>Entry Point (Bank buildup)</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ff00ff', borderRadius: '50%' }}></span>
+                <span>Rollout Start</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ff00ff' }}></span>
+                <span>Rollout Segment</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#00ff00' }}></span>
+                <span>Altitude Acceptable (±100ft)</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ffff00' }}></span>
+                <span>Altitude Warning (±150ft)</span>
+              </div>
+              <div className="legend-item">
+                <span className="legend-color" style={{ background: '#ff0000' }}></span>
+                <span>Altitude Busted</span>
+              </div>
+            </>
+          )}
         </div>
         <div className="flight-path-3d-instructions">
           <p>🖱️ Drag to rotate • 🔍 Scroll to zoom • 🖱️ Hover over path to see data</p>

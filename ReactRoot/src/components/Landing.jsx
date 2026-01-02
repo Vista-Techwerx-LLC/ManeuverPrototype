@@ -82,9 +82,7 @@ function getAirportName(airportCode) {
 
 // Get runway display name
 function getRunwayDisplayName(runwayId, customRunways) {
-  if (runwayId === '27') {
-    return 'KJKA 27 (Jack Edwards)'
-  }
+  if (!runwayId) return 'Select a runway'
 
   const customRunway = customRunways.find(r => r.id === runwayId)
   if (!customRunway) return runwayId
@@ -94,8 +92,6 @@ function getRunwayDisplayName(runwayId, customRunways) {
   return airportName ? `${customRunway.name} (${airportName})` : customRunway.name
 }
 
-const DEFAULT_RUNWAY_NAMES = ['KJKA 9', 'KJKA 9 (Jack Edwards)']
-const DEFAULT_LANDING_PATH_NAME = 'KJKA 9 (nose dive before runway)'
 
 const saveInProgress = new Set()
 
@@ -142,7 +138,7 @@ export default function Landing({ user }) {
   const [currentPhase, setCurrentPhase] = useState(LANDING_PHASES.NONE)
   const [phaseHistory, setPhaseHistory] = useState([])
   const [vref, setVref] = useState(60) // Default Vref, user can adjust
-  const [selectedRunway, setSelectedRunway] = useState('27') // KJKA Runway 27
+  const [selectedRunway, setSelectedRunway] = useState(null)
   const [customRunways, setCustomRunways] = useState([])
   const [dropdownOpen, setDropdownOpen] = useState(false)
   const [pathDropdownOpen, setPathDropdownOpen] = useState(false)
@@ -208,14 +204,6 @@ export default function Landing({ user }) {
     loadRunways()
   }, [user])
 
-  useEffect(() => {
-    if (selectedRunway !== '27') return
-    const defaultRunway = customRunways.find(rwy => DEFAULT_RUNWAY_NAMES.includes(rwy.name))
-    if (defaultRunway) {
-      setSelectedRunway(defaultRunway.id)
-    }
-  }, [customRunways, selectedRunway])
-
   // Load saved landing paths for current runway (including connected users)
   useEffect(() => {
     async function loadLandingPaths() {
@@ -261,15 +249,6 @@ export default function Landing({ user }) {
     loadLandingPaths()
   }, [user, selectedRunway])
 
-  useEffect(() => {
-    if (selectedLandingPath || savedLandingPaths.length === 0) return
-    const defaultPath = savedLandingPaths.find(path =>
-      path.path_name?.toLowerCase().includes('kjka 9')
-    )
-    if (defaultPath) {
-      setSelectedLandingPath(defaultPath.id)
-    }
-  }, [savedLandingPaths, selectedLandingPath])
 
   const activeLandingPath = useMemo(() => {
     if (!selectedLandingPath) return null
@@ -321,21 +300,20 @@ export default function Landing({ user }) {
   }
 
   const runway = useMemo(() => {
+    if (!selectedRunway) return null
+    
     // Check if selected runway is a custom runway
-    if (selectedRunway.startsWith('custom_')) {
-      const custom = customRunways.find(r => r.id === selectedRunway)
-      if (custom) {
-        return {
-          heading: custom.heading,
-          threshold: custom.threshold,
-          oppositeEnd: custom.oppositeEnd,
-          length: custom.length,
-          width: custom.width || 100
-        }
+    const custom = customRunways.find(r => r.id === selectedRunway)
+    if (custom) {
+      return {
+        heading: custom.heading,
+        threshold: custom.threshold,
+        oppositeEnd: custom.oppositeEnd,
+        length: custom.length,
+        width: custom.width || 100
       }
     }
-    // Default to KJKA Runway 27
-    if (selectedRunway === '27') return JKA_AIRPORT.runway27
+    
     return null
   }, [selectedRunway, customRunways])
 
@@ -1244,8 +1222,14 @@ export default function Landing({ user }) {
     // Reload custom runways
     const loaded = await loadCustomRunways(user)
     setCustomRunways(loaded)
-    // Select the newly created runway
-    setSelectedRunway(newRunway.id)
+    // Find the newly created runway by name (since ID might differ after database save)
+    const savedRunway = loaded.find(rwy => rwy.name === newRunway.name && rwy.fromDatabase === true)
+    if (savedRunway) {
+      setSelectedRunway(savedRunway.id)
+    } else if (newRunway.id) {
+      // Fallback to original ID if not found
+      setSelectedRunway(newRunway.id)
+    }
     setShowCalibration(false)
   }
 
@@ -1475,9 +1459,11 @@ export default function Landing({ user }) {
       <div className="landing-container">
         <h1>Landing Approach Tracker</h1>
         <p className="subtitle">
-          {selectedRunway.startsWith('custom_') 
-            ? customRunways.find(r => r.id === selectedRunway)?.name || 'Custom Runway'
-            : `KJKA (Jack Edwards Airport, Gulf Shores AL) — Runway ${selectedRunway}`
+          {selectedRunway 
+            ? (selectedRunway.startsWith('custom_') 
+                ? customRunways.find(r => r.id === selectedRunway)?.name || 'Custom Runway'
+                : `KJKA (Jack Edwards Airport, Gulf Shores AL) — Runway ${selectedRunway}`)
+            : 'Select a runway to begin tracking'
           }
         </p>
 
@@ -1547,27 +1533,27 @@ export default function Landing({ user }) {
                     >
                       <div className="selected-info">
                         <span className="selected-name">
-                          {selectedRunway === '27' 
-                            ? 'KJKA 27 (Jack Edwards)' 
-                            : (() => {
+                          {selectedRunway 
+                            ? (() => {
                                 const rwy = customRunways.find(r => r.id === selectedRunway)
                                 if (!rwy) return 'Custom Runway'
                                 const airportCode = extractAirportCode(rwy.name)
                                 const airportName = airportCode ? getAirportName(airportCode) : null
                                 return airportName ? `${rwy.name} (${airportName})` : rwy.name
                               })()
+                            : 'Select a runway'
                           }
                         </span>
                         <span className="selected-details">
-                          {selectedRunway === '27' 
-                            ? 'Heading 270° (West) — 6,969 ft' 
-                            : (() => {
+                          {selectedRunway 
+                            ? (() => {
                                 const rwy = customRunways.find(r => r.id === selectedRunway)
                                 if (!rwy) return ''
                                 const direction = getCardinalDirection(rwy.heading)
                                 const length = rwy.length ? `${rwy.length.toLocaleString()} ft` : 'Custom'
                                 return `Heading ${rwy.heading}° (${direction}) — ${length}`
                               })()
+                            : ''
                           }
                         </span>
                       </div>
@@ -1576,38 +1562,30 @@ export default function Landing({ user }) {
 
                     {dropdownOpen && (
                       <div className="dropdown-options">
-                        <div 
-                          className={`dropdown-option ${selectedRunway === '27' ? 'active' : ''}`}
-                          onClick={() => {
-                            setSelectedRunway('27')
-                            setDropdownOpen(false)
-                          }}
-                        >
-                          <div className="option-main">KJKA 27 (Jack Edwards)</div>
-                          <div className="option-sub">Heading 270° (West) — 6,969 ft</div>
-                        </div>
-                        {customRunways.map(rwy => {
-                          const direction = getCardinalDirection(rwy.heading)
-                          const length = rwy.length ? `${rwy.length.toLocaleString()} ft` : 'Custom'
-                          const airportCode = extractAirportCode(rwy.name)
-                          const airportName = airportCode ? getAirportName(airportCode) : null
-                          const displayName = airportName ? `${rwy.name} (${airportName})` : rwy.name
-                          return (
-                            <div 
-                              key={rwy.id}
-                              className={`dropdown-option ${selectedRunway === rwy.id ? 'active' : ''}`}
-                              onClick={() => {
-                                setSelectedRunway(rwy.id)
-                                setDropdownOpen(false)
-                              }}
-                            >
-                              <div className="option-main">{displayName}</div>
-                              <div className="option-sub">
-                                Heading {rwy.heading}° ({direction}) — {length}
+                        {customRunways
+                          .filter(rwy => rwy.fromDatabase === true)
+                          .map(rwy => {
+                            const direction = getCardinalDirection(rwy.heading)
+                            const length = rwy.length ? `${rwy.length.toLocaleString()} ft` : 'Custom'
+                            const airportCode = extractAirportCode(rwy.name)
+                            const airportName = airportCode ? getAirportName(airportCode) : null
+                            const displayName = airportName ? `${rwy.name} (${airportName})` : rwy.name
+                            return (
+                              <div 
+                                key={rwy.id}
+                                className={`dropdown-option ${selectedRunway === rwy.id ? 'active' : ''}`}
+                                onClick={() => {
+                                  setSelectedRunway(rwy.id)
+                                  setDropdownOpen(false)
+                                }}
+                              >
+                                <div className="option-main">{displayName}</div>
+                                <div className="option-sub">
+                                  Heading {rwy.heading}° ({direction}) — {length}
+                                </div>
                               </div>
-                            </div>
-                          )
-                        })}
+                            )
+                          })}
                       </div>
                     )}
                   </div>
@@ -2100,6 +2078,7 @@ export default function Landing({ user }) {
                         })()}
                         runway={runway}
                         runwayName={getRunwayDisplayName(selectedRunway, customRunways)}
+                        maneuverType="path_following"
                       />
                     </div>
                   </>

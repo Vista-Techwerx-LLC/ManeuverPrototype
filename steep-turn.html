@@ -748,7 +748,7 @@
       maxSpdEl.className = "max " + (Math.abs(tracking.maxSpdDev) <= 10 ? "pass" : "fail");
 
       const maxBankEl = document.getElementById("maxBankDev");
-      maxBankEl.textContent = (tracking.maxBankDev >= 0 ? "+" : "") + Math.round(tracking.maxBankDev) + "° from 45°";
+      maxBankEl.textContent = (tracking.maxBankDev >= 0 ? "+" : "") + Math.round(tracking.maxBankDev) + "°";
       maxBankEl.className = "max " + (Math.abs(tracking.maxBankDev) <= 5 ? "pass" : "fail");
 
       const rolloutEl = document.getElementById("rolloutErr");

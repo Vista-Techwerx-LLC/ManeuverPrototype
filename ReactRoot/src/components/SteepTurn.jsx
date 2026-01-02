@@ -1432,6 +1432,8 @@ export default function SteepTurn({ user }) {
                     <FlightPath3D 
                       flightPath={tracking.flightPath} 
                       entry={flightPathEntry}
+                      maneuverType={MANEUVER_TYPES.STEEP_TURN}
+                      skillLevel={autoStartSkillLevel}
                     />
                   </div>
                 )}

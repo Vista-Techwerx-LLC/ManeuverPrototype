@@ -122,8 +122,18 @@ export default function ApproachPath({
       ctx.setLineDash([5, 5])
       ctx.lineWidth = 1
       ctx.beginPath()
-      ctx.moveTo(runwayX, runwayY - runwayLengthPx)
-      ctx.lineTo(runwayX, runwayY + 200) // Extend beyond threshold
+      // If no landing path is selected (or path is invalid), extend to 5NM backward from threshold
+      // Otherwise, extend to 200 pixels forward as before
+      const hasValidPath = selectedLandingPath && selectedLandingPath.length > 3
+      if (hasValidPath) {
+        // With path: extend forward 200 pixels from threshold
+        ctx.moveTo(runwayX, runwayY - runwayLengthPx)
+        ctx.lineTo(runwayX, runwayY + 200)
+      } else {
+        // Without path: extend backward 5NM from threshold (approach direction)
+        ctx.moveTo(runwayX, runwayY - 5 * scale)
+        ctx.lineTo(runwayX, runwayY + 200)
+      }
       ctx.stroke()
       ctx.setLineDash([])
       
