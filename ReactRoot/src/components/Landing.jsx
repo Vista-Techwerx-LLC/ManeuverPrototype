@@ -763,6 +763,18 @@ export default function Landing({ user }) {
 
     if (autoStartTriggered.current) return
 
+    // Prevent auto-start if aircraft is on ground or not moving (invalid state for landing tracking)
+    if (data.on_ground) {
+      setAutoStartStatus({ type: 'monitoring', message: 'Aircraft must be airborne for auto-start' })
+      return
+    }
+
+    const speed = data.ias_kt ?? data.ias ?? 0
+    if (speed < 30) {
+      setAutoStartStatus({ type: 'monitoring', message: 'Aircraft must be moving (>30 kt) for auto-start' })
+      return
+    }
+
     const landingTolerance = AUTO_START_TOLERANCES[MANEUVER_TYPES.LANDING]?.[autoStartSkillLevel] || { entryRadiusNm: 0.3 }
     const entryRadius = landingTolerance.entryRadiusNm ?? 0.3
 
@@ -805,10 +817,15 @@ export default function Landing({ user }) {
       completePathFollowing()
     } else {
       // Save landing data if we have any tracking data, even without a landing path selected
-      if (flightPath.length > 0 || phaseHistory.length > 0 || violations.length > 0 || gatesPassed.length > 0) {
+      // But also check that we have meaningful deviation samples (not all zeros)
+      const hasFlightData = flightPath.length > 0 || phaseHistory.length > 0 || violations.length > 0 || gatesPassed.length > 0
+      const hasDeviationData = landingDeviations.current.samples && landingDeviations.current.samples.length > 0
+      
+      if (hasFlightData && hasDeviationData) {
         setTracking(false)
         completeLanding()
       } else {
+        console.log('Stopping tracking: Insufficient data collected for landing result')
         setTracking(false)
         setState(connected ? 'ready' : 'disconnected')
         setCurrentPhase(LANDING_PHASES.NONE)
@@ -937,7 +954,22 @@ export default function Landing({ user }) {
     if (!hasBeenSaved.current) {
       hasBeenSaved.current = true
       
-      const { maxAltDev, maxSpeedDev, maxBankDev, maxPitchDev } = landingDeviations.current
+      const { maxAltDev, maxSpeedDev, maxBankDev, maxPitchDev, samples } = landingDeviations.current
+
+      // Validation: Prevent saving invalid results with all zeros
+      // This can happen if auto-start triggers but no deviation data is collected
+      const hasNoData = maxAltDev === 0 && maxSpeedDev === 0 && maxBankDev === 0 && maxPitchDev === 0
+      const hasNoSamples = !samples || samples.length === 0
+      
+      if (hasNoData || hasNoSamples) {
+        console.warn('⚠️ Landing completion blocked: No deviation data collected. This may be due to auto-start triggering incorrectly.')
+        setTracking(false)
+        setState(connected ? 'ready' : 'disconnected')
+        setCurrentPhase(LANDING_PHASES.NONE)
+        setNearRunwayButNotPath(false)
+        hasBeenSaved.current = false // Reset so it can be saved if manually triggered again
+        return
+      }
 
       const busted = {
         altitude: maxAltDev > 100,

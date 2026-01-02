@@ -181,6 +181,10 @@
   border-left: 4px solid var(--red-bright);
 }
 
+.maneuver-card.grade-yellow {
+  border-left: 4px solid #ffd700;
+}
+
 .maneuver-header {
   display: flex;
   justify-content: space-between;
@@ -245,6 +249,21 @@
 .grade-text.fail {
   color: var(--red-bright);
   background: rgba(248, 81, 73, 0.1);
+}
+
+.grade-text.grade-green {
+  color: #00ff88;
+  background: rgba(0, 255, 136, 0.1);
+}
+
+.grade-text.grade-yellow {
+  color: #ffd700;
+  background: rgba(255, 215, 0, 0.1);
+}
+
+.grade-text.grade-red {
+  color: #ff4444;
+  background: rgba(255, 68, 68, 0.1);
 }
 
 .maneuver-details {
@@ -321,6 +340,56 @@
 
 .deviation-grid > div.fail {
   border-left: 3px solid var(--red-bright);
+}
+
+.deviation-grid > div.grade-green {
+  border-left: 3px solid #00ff88;
+}
+
+.deviation-grid > div.grade-yellow {
+  border-left: 3px solid #ffd700;
+}
+
+.deviation-grid > div.grade-red {
+  border-left: 3px solid #ff4444;
+}
+
+.grade-breakdown {
+  margin-top: 12px;
+}
+
+.grade-breakdown h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+
+.breakdown-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.breakdown-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 6px;
+}
+
+.breakdown-item .grade-green {
+  color: #00ff88;
+}
+
+.breakdown-item .grade-yellow {
+  color: #ffd700;
+}
+
+.breakdown-item .grade-red {
+  color: #ff4444;
 }
 
 .empty-state {

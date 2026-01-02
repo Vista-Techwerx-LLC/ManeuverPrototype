@@ -508,8 +508,30 @@ function ManeuverCard({ maneuver, customRunways }) {
     return level.charAt(0).toUpperCase() + level.slice(1)
   }
 
+  // Determine grade color class - use getGradeColorClass for letter grades, pass/fail for steep turns
+  const getGradeClass = () => {
+    if (isSteepTurn) {
+      return isPassed ? 'pass' : 'fail'
+    }
+    // For landing and path_following, use letter grade colors
+    return getGradeColorClass(maneuver.grade)
+  }
+
+  // Determine card border color
+  const getCardClass = () => {
+    if (isSteepTurn) {
+      return isPassed ? 'pass' : 'fail'
+    }
+    // For landing and path_following, use letter grade colors
+    const gradeClass = getGradeColorClass(maneuver.grade)
+    if (gradeClass === 'grade-green') return 'pass'
+    if (gradeClass === 'grade-yellow') return 'grade-yellow'
+    if (gradeClass === 'grade-red') return 'fail'
+    return 'fail'
+  }
+
   return (
-    <div className={`maneuver-card ${isPassed ? 'pass' : 'fail'}`}>
+    <div className={`maneuver-card ${getCardClass()}`}>
       <div className="maneuver-header" onClick={() => setExpanded(!expanded)}>
         <div className="maneuver-info">
           <div className="maneuver-type">
@@ -525,7 +547,7 @@ function ManeuverCard({ maneuver, customRunways }) {
           </div>
         </div>
         <div className="maneuver-grade-badge">
-          <span className={`grade-text ${isPassed ? 'pass' : 'fail'}`}>
+          <span className={`grade-text ${getGradeClass()}`}>
             {maneuver.grade}
           </span>
         </div>
