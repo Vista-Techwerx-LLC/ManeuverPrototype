@@ -974,10 +974,6 @@ export default function Landing({ user }) {
         },
         busted,
         skillLevel: pathFollowingSkillLevel,
-        phaseHistory,
-        phaseMetrics,
-        gatesPassed,
-        violations,
         touchdown: touchdownData.current,
         flightPath,
         runway: {
