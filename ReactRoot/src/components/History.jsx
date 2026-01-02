@@ -329,6 +329,54 @@ async function updateManeuverWithFeedback(maneuverId, feedback) {
   }
 }
 
+function getGradeColors(grade) {
+  const gradeClass = getGradeColorClass(grade)
+  if (gradeClass === 'grade-green') {
+    return {
+      border: '#00ff88',
+      bg: 'rgba(0, 255, 136, 0.15)',
+      bgHover: 'rgba(0, 255, 136, 0.25)',
+      bgSelected: 'rgba(0, 255, 136, 0.25)',
+      text: '#00ff88',
+      shadow: 'rgba(0, 255, 136, 0.4)',
+      shadowGlow: 'rgba(0, 255, 136, 0.2)',
+      shadowHover: 'rgba(0, 255, 136, 0.3)'
+    }
+  } else if (gradeClass === 'grade-yellow') {
+    return {
+      border: '#ffd700',
+      bg: 'rgba(255, 215, 0, 0.15)',
+      bgHover: 'rgba(255, 215, 0, 0.25)',
+      bgSelected: 'rgba(255, 215, 0, 0.25)',
+      text: '#ffd700',
+      shadow: 'rgba(255, 215, 0, 0.4)',
+      shadowGlow: 'rgba(255, 215, 0, 0.2)',
+      shadowHover: 'rgba(255, 215, 0, 0.3)'
+    }
+  } else if (gradeClass === 'grade-red') {
+    return {
+      border: '#ff4444',
+      bg: 'rgba(255, 68, 68, 0.15)',
+      bgHover: 'rgba(255, 68, 68, 0.25)',
+      bgSelected: 'rgba(255, 68, 68, 0.25)',
+      text: '#ff4444',
+      shadow: 'rgba(255, 68, 68, 0.4)',
+      shadowGlow: 'rgba(255, 68, 68, 0.2)',
+      shadowHover: 'rgba(255, 68, 68, 0.3)'
+    }
+  }
+  return {
+    border: 'rgba(255, 255, 255, 0.2)',
+    bg: 'rgba(255, 255, 255, 0.05)',
+    bgHover: 'rgba(255, 255, 255, 0.1)',
+    bgSelected: 'rgba(255, 255, 255, 0.1)',
+    text: '#fff',
+    shadow: 'rgba(255, 255, 255, 0.2)',
+    shadowGlow: 'rgba(255, 255, 255, 0.1)',
+    shadowHover: 'rgba(255, 255, 255, 0.15)'
+  }
+}
+
 function ManeuverCard({ maneuver, onDelete, customRunways }) {
   const [expanded, setExpanded] = useState(false)
   const [aiFeedback, setAiFeedback] = useState('')
@@ -336,6 +384,7 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiError, setAiError] = useState('')
   const [showAllTips, setShowAllTips] = useState(false)
+  const [selectedPhase, setSelectedPhase] = useState(null)
   const details = maneuver.result_data
   const gradeText = getManeuverGrade(maneuver)
   const isPassed = !isFailGrade(gradeText)
@@ -485,42 +534,228 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
 
       {expanded && details && (
         <div className="maneuver-details">
-          {(maneuver.maneuver_type === 'landing' || maneuver.maneuver_type === 'path_following') && details.gradeDetails && details.gradeDetails.breakdown && (
+          {(maneuver.maneuver_type === 'landing' || maneuver.maneuver_type === 'path_following') && details.gradeDetails && (
             <div className="details-section">
               <div className="grade-breakdown">
-                <h3>Grade Breakdown</h3>
-                <div className="breakdown-grid">
-                  <div className="breakdown-item">
-                    <span>Altitude:</span>
-                    <span className={getGradeColorClass(details.gradeDetails.breakdown.altitude)}>
-                      {details.gradeDetails.breakdown.altitude}
-                    </span>
-                  </div>
-                  <div className="breakdown-item">
-                    <span>Lateral:</span>
-                    <span className={getGradeColorClass(details.gradeDetails.breakdown.lateral)}>
-                      {details.gradeDetails.breakdown.lateral}
-                    </span>
-                  </div>
-                  <div className="breakdown-item">
-                    <span>Speed:</span>
-                    <span className={getGradeColorClass(details.gradeDetails.breakdown.speed)}>
-                      {details.gradeDetails.breakdown.speed}
-                    </span>
-                  </div>
-                  <div className="breakdown-item">
-                    <span>Bank:</span>
-                    <span className={getGradeColorClass(details.gradeDetails.breakdown.bank)}>
-                      {details.gradeDetails.breakdown.bank}
-                    </span>
-                  </div>
-                  <div className="breakdown-item">
-                    <span>Pitch:</span>
-                    <span className={getGradeColorClass(details.gradeDetails.breakdown.pitch)}>
-                      {details.gradeDetails.breakdown.pitch}
-                    </span>
-                  </div>
-                </div>
+                {details.gradeDetails.phaseGrades && Object.keys(details.gradeDetails.phaseGrades).length > 0 ? (
+                  <>
+                    <h3 style={{ marginBottom: '16px', display: 'block', width: '100%' }}>Phase Grades</h3>
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', width: '100%' }}>
+                      {Object.entries(details.gradeDetails.phaseGrades).map(([phase, grade]) => {
+                        const phaseName = phase.charAt(0).toUpperCase() + phase.slice(1)
+                        const isSelected = selectedPhase === phase
+                        const colors = getGradeColors(grade)
+                        return (
+                          <button
+                            key={phase}
+                            onClick={() => setSelectedPhase(isSelected ? null : phase)}
+                            className={`phase-button ${getGradeColorClass(grade)} ${isSelected ? 'selected' : ''}`}
+                            style={{
+                              padding: '10px 18px',
+                              borderRadius: '8px',
+                              border: `2px solid ${isSelected ? colors.border : colors.border}`,
+                              backgroundColor: isSelected ? colors.bgSelected : colors.bg,
+                              color: '#fff',
+                              cursor: 'pointer',
+                              fontWeight: isSelected ? '600' : '500',
+                              transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '10px',
+                              fontSize: '14px',
+                              boxShadow: isSelected 
+                                ? `0 0 0 1px ${colors.shadow}, 0 4px 12px ${colors.shadowGlow}`
+                                : '0 2px 4px rgba(0, 0, 0, 0.1)',
+                              transform: isSelected ? 'translateY(-1px)' : 'translateY(0)',
+                              position: 'relative',
+                              overflow: 'hidden'
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!isSelected) {
+                                e.currentTarget.style.backgroundColor = colors.bgHover
+                                e.currentTarget.style.transform = 'translateY(-2px)'
+                                e.currentTarget.style.boxShadow = `0 4px 12px ${colors.shadowHover}`
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isSelected) {
+                                e.currentTarget.style.backgroundColor = colors.bg
+                                e.currentTarget.style.transform = 'translateY(0)'
+                                e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)'
+                              }
+                            }}
+                          >
+                            <span style={{ 
+                              fontSize: '13px',
+                              letterSpacing: '0.3px',
+                              opacity: 0.9
+                            }}>
+                              {phaseName}
+                            </span>
+                            <span 
+                              className={getGradeColorClass(grade)} 
+                              style={{ 
+                                fontWeight: '700',
+                                fontSize: '15px',
+                                fontFamily: "'Consolas', 'Courier New', monospace",
+                                color: colors.text,
+                                textShadow: `0 0 8px ${colors.shadow}`
+                              }}
+                            >
+                              {grade}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                    {selectedPhase && details.gradeDetails.breakdown?.[selectedPhase] && (
+                      <div style={{ padding: '4px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)', marginBottom: '12px', width: '100%', display: 'block' }}>
+                        <h4 style={{ marginBottom: '12px', fontSize: '1.1em' }}>
+                          {selectedPhase.charAt(0).toUpperCase() + selectedPhase.slice(1)} Breakdown
+                        </h4>
+                        <div className="breakdown-grid">
+                          {Object.entries(details.gradeDetails.breakdown[selectedPhase]).map(([category, categoryGrade]) => {
+                            const categoryNames = {
+                              altitude: 'Altitude',
+                              lateral: 'Lateral',
+                              speed: 'Speed',
+                              bank: 'Bank',
+                              pitch: 'Pitch'
+                            }
+                            const maxByPhase = details.gradeDetails.maxByPhase?.[selectedPhase]
+                            let maxDeviation = null
+                            let unit = ''
+                            let showSign = false
+                            
+                            if (maxByPhase) {
+                              if (category === 'altitude') {
+                                maxDeviation = maxByPhase.altitudeFtSigned !== undefined ? maxByPhase.altitudeFtSigned : maxByPhase.altitudeFt
+                                unit = 'ft'
+                                showSign = maxByPhase.altitudeFtSigned !== undefined
+                              } else if (category === 'lateral') {
+                                maxDeviation = maxByPhase.lateralFt
+                                unit = 'ft'
+                                showSign = false
+                              } else if (category === 'speed') {
+                                if (maxByPhase.speedKtSigned !== undefined) {
+                                  maxDeviation = maxByPhase.speedKtSigned
+                                } else {
+                                  maxDeviation = maxByPhase.speedKt
+                                }
+                                unit = 'kt'
+                                showSign = true
+                              } else if (category === 'bank') {
+                                maxDeviation = maxByPhase.bankDeg
+                                unit = '°'
+                                showSign = true
+                              } else if (category === 'pitch') {
+                                maxDeviation = maxByPhase.pitchDegSigned !== undefined ? maxByPhase.pitchDegSigned : maxByPhase.pitchDeg
+                                unit = '°'
+                                showSign = maxByPhase.pitchDegSigned !== undefined
+                              }
+                            }
+                            
+                            return (
+                              <div key={category} className="breakdown-item">
+                                <span>{categoryNames[category] || category}:</span>
+                                <span>
+                                  <span className={getGradeColorClass(categoryGrade)}>
+                                    {categoryGrade}
+                                  </span>
+                                  {maxDeviation !== null && maxDeviation !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({showSign ? ((maxDeviation >= 0 ? '+' : '') + Math.round(Math.abs(maxDeviation))) : Math.round(maxDeviation)}{unit})
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
+                    {details.gradeDetails.notes && details.gradeDetails.notes.length > 0 && (
+                      <div style={{ marginTop: '12px', padding: '8px', backgroundColor: 'rgba(255, 193, 7, 0.15)', borderRadius: '4px', fontSize: '0.9rem', border: '1px solid rgba(255, 193, 7, 0.3)', color: '#fff', width: '100%', display: 'block', clear: 'both' }}>
+                        {details.gradeDetails.notes.map((note, idx) => (
+                          <div key={idx}>{note}</div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : details.gradeDetails.breakdown && (
+                  <>
+                    <h3>Grade Breakdown</h3>
+                    <div className="breakdown-grid">
+                      <div className="breakdown-item">
+                        <span>Altitude:</span>
+                        <span>
+                          <span className={getGradeColorClass(details.gradeDetails.breakdown.altitude)}>
+                            {details.gradeDetails.breakdown.altitude}
+                          </span>
+                          {details.maxDeviations?.altitude !== undefined && (
+                            <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                              ({(details.maxDeviations.altitude >= 0 ? '+' : '') + Math.round(details.maxDeviations.altitude) + ' ft'})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      {maneuver.maneuver_type === 'path_following' && (
+                        <div className="breakdown-item">
+                          <span>Lateral:</span>
+                          <span>
+                            <span className={getGradeColorClass(details.gradeDetails.breakdown.lateral)}>
+                              {details.gradeDetails.breakdown.lateral}
+                            </span>
+                            {details.maxDeviations?.lateral !== undefined && (
+                              <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                ({(details.maxDeviations.lateral >= 0 ? '+' : '') + Math.round(details.maxDeviations.lateral * 6076)} ft)
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      )}
+                      <div className="breakdown-item">
+                        <span>Speed:</span>
+                        <span>
+                          <span className={getGradeColorClass(details.gradeDetails.breakdown.speed)}>
+                            {details.gradeDetails.breakdown.speed}
+                          </span>
+                          {details.maxDeviations?.speed !== undefined && (
+                            <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                              ({(details.maxDeviations.speed >= 0 ? '+' : '') + Math.round(details.maxDeviations.speed) + ' kt'})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Bank:</span>
+                        <span>
+                          <span className={getGradeColorClass(details.gradeDetails.breakdown.bank)}>
+                            {details.gradeDetails.breakdown.bank}
+                          </span>
+                          {details.maxDeviations?.bank !== undefined && (
+                            <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                              ({(details.maxDeviations.bank >= 0 ? '+' : '') + Math.round(details.maxDeviations.bank) + '°'})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="breakdown-item">
+                        <span>Pitch:</span>
+                        <span>
+                          <span className={getGradeColorClass(details.gradeDetails.breakdown.pitch)}>
+                            {details.gradeDetails.breakdown.pitch}
+                          </span>
+                          {details.maxDeviations?.pitch !== undefined && (
+                            <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                              ({(details.maxDeviations.pitch >= 0 ? '+' : '') + Math.round(details.maxDeviations.pitch) + '°'})
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -808,75 +1043,6 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                 </div>
               )}
 
-              {(maneuver.maneuver_type === 'landing' || maneuver.maneuver_type === 'path_following') && details.maxDeviations && (
-                <div className="details-section">
-                  <h3>Maximum Deviations</h3>
-                  <div className="deviation-grid">
-                    {details.maxDeviations.altitude !== undefined && (
-                      <div className={details.gradeDetails?.breakdown?.altitude 
-                        ? getGradeColorClass(details.gradeDetails.breakdown.altitude)
-                        : getAltitudeDeviationClass(details.maxDeviations.altitude)}>
-                        <span className="label">
-                          {maneuver.maneuver_type === 'landing' ? 'Altitude (from glidepath):' : 'Altitude:'}
-                        </span>
-                        <span className="value">
-                          {maneuver.maneuver_type === 'landing' 
-                            ? Math.round(details.maxDeviations.altitude) + ' ft'
-                            : (details.maxDeviations.altitude >= 0 ? '+' : '') + Math.round(details.maxDeviations.altitude) + ' ft'}
-                        </span>
-                      </div>
-                    )}
-                    {details.maxDeviations.lateral !== undefined && maneuver.maneuver_type === 'path_following' && (
-                      <div className={details.gradeDetails?.breakdown?.lateral
-                        ? getGradeColorClass(details.gradeDetails.breakdown.lateral)
-                        : (Math.abs(details.maxDeviations.lateral) <= 50 ? 'pass' : 'fail')}>
-                        <span className="label">Lateral (Path):</span>
-                        <span className="value">
-                          {Math.round(details.maxDeviations.lateral * 6076)} ft
-                        </span>
-                      </div>
-                    )}
-                    {details.maxDeviations.speed !== undefined && (
-                      <div className={details.gradeDetails?.breakdown?.speed
-                        ? getGradeColorClass(details.gradeDetails.breakdown.speed)
-                        : (Math.abs(details.maxDeviations.speed) <= 10 ? 'pass' : 'fail')}>
-                        <span className="label">
-                          {maneuver.maneuver_type === 'landing' ? 'Speed (from Vref+5):' : 'Speed:'}
-                        </span>
-                        <span className="value">
-                          {maneuver.maneuver_type === 'landing'
-                            ? Math.round(details.maxDeviations.speed) + ' kt'
-                            : (details.maxDeviations.speed >= 0 ? '+' : '') + Math.round(details.maxDeviations.speed) + ' kt'}
-                        </span>
-                      </div>
-                    )}
-                    {details.maxDeviations.bank !== undefined && (
-                      <div className={details.gradeDetails?.breakdown?.bank
-                        ? getGradeColorClass(details.gradeDetails.breakdown.bank)
-                        : (Math.abs(details.maxDeviations.bank) <= 5 ? 'pass' : 'fail')}>
-                        <span className="label">Bank Angle:</span>
-                        <span className="value">
-                          {maneuver.maneuver_type === 'landing'
-                            ? Math.round(details.maxDeviations.bank) + '°'
-                            : (details.maxDeviations.bank >= 0 ? '+' : '') + Math.round(details.maxDeviations.bank) + '°'}
-                        </span>
-                      </div>
-                    )}
-                    {details.maxDeviations.pitch !== undefined && (
-                      <div className={details.gradeDetails?.breakdown?.pitch
-                        ? getGradeColorClass(details.gradeDetails.breakdown.pitch)
-                        : (Math.abs(details.maxDeviations.pitch) <= 3 ? 'pass' : 'fail')}>
-                        <span className="label">Pitch Angle:</span>
-                        <span className="value">
-                          {maneuver.maneuver_type === 'landing'
-                            ? Math.round(details.maxDeviations.pitch) + '°'
-                            : (details.maxDeviations.pitch >= 0 ? '+' : '') + Math.round(details.maxDeviations.pitch) + '°'}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
 
               {details.runway && (
                 <div className="details-section">

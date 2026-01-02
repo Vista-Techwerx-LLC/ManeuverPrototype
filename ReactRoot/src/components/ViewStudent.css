@@ -381,15 +381,21 @@
 }
 
 .breakdown-item .grade-green {
-  color: #00ff88;
+  color: #00ff88 !important;
+  font-weight: 700;
+  font-size: 1rem;
 }
 
 .breakdown-item .grade-yellow {
-  color: #ffd700;
+  color: #ffd700 !important;
+  font-weight: 700;
+  font-size: 1rem;
 }
 
 .breakdown-item .grade-red {
-  color: #ff4444;
+  color: #ff4444 !important;
+  font-weight: 700;
+  font-size: 1rem;
 }
 
 .empty-state {

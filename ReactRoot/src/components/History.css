@@ -936,6 +936,8 @@
   color: #ddd;
   font-weight: 600;
   letter-spacing: 0.5px;
+  display: block;
+  width: 100%;
 }
 
 .breakdown-grid {
@@ -976,25 +978,41 @@
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid transparent;
+  color: inherit;
 }
 
 .breakdown-item .pass {
-  color: #00ff88;
+  color: #00ff88 !important;
+  font-weight: 700;
+  font-size: 1.1rem;
+  font-family: 'Courier New', monospace;
 }
 
 .breakdown-item .fail {
-  color: #ff4444;
+  color: #ff4444 !important;
+  font-weight: 700;
+  font-size: 1.1rem;
+  font-family: 'Courier New', monospace;
 }
 
 .breakdown-item .grade-green {
-  color: #00ff88;
+  color: #00ff88 !important;
+  font-weight: 700;
+  font-size: 1.1rem;
+  font-family: 'Courier New', monospace;
 }
 
 .breakdown-item .grade-yellow {
-  color: #ffd700;
+  color: #ffd700 !important;
+  font-weight: 700;
+  font-size: 1.1rem;
+  font-family: 'Courier New', monospace;
 }
 
 .breakdown-item .grade-red {
-  color: #ff4444;
+  color: #ff4444 !important;
+  font-weight: 700;
+  font-size: 1.1rem;
+  font-family: 'Courier New', monospace;
 }
 

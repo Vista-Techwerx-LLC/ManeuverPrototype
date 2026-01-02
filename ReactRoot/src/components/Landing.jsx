@@ -11,6 +11,7 @@ import {
   checkGatePassage,
   calculateDistance,
   calculateBearing,
+  calculateLateralDeviation,
   normalizeAngle
 } from '../utils/landingStandards'
 import ApproachPath from './ApproachPath'
@@ -18,7 +19,7 @@ import ApproachPathReplay from './ApproachPathReplay'
 import RunwayCalibration, { loadCustomRunways } from './RunwayCalibration'
 import FlightPath3D from './FlightPath3D'
 import AutoStart from './AutoStart'
-import { gradePathFollowing } from '../utils/pathFollowingGrading'
+import { gradeLandingPathPhaseBased, ACS_THRESHOLDS, PHASE_WEIGHTS, METRIC_WEIGHTS, SKILL_MULTIPLIERS } from '../utils/landingGradingScale'
 import { fetchPathFollowingFeedback } from '../lib/aiFeedback'
 import { getGradeColorClass } from '../utils/steepTurnGrading'
 import { SKILL_LEVELS, MANEUVER_TYPES, AUTO_START_TOLERANCES } from '../utils/autoStartTolerances'
@@ -90,6 +91,54 @@ function getRunwayDisplayName(runwayId, customRunways) {
   const airportCode = extractAirportCode(customRunway.name)
   const airportName = airportCode ? getAirportName(airportCode) : null
   return airportName ? `${customRunway.name} (${airportName})` : customRunway.name
+}
+
+function getGradeColors(grade) {
+  const gradeClass = getGradeColorClass(grade)
+  if (gradeClass === 'grade-green') {
+    return {
+      border: '#00ff88',
+      bg: 'rgba(0, 255, 136, 0.15)',
+      bgHover: 'rgba(0, 255, 136, 0.25)',
+      bgSelected: 'rgba(0, 255, 136, 0.25)',
+      text: '#00ff88',
+      shadow: 'rgba(0, 255, 136, 0.4)',
+      shadowGlow: 'rgba(0, 255, 136, 0.2)',
+      shadowHover: 'rgba(0, 255, 136, 0.3)'
+    }
+  } else if (gradeClass === 'grade-yellow') {
+    return {
+      border: '#ffd700',
+      bg: 'rgba(255, 215, 0, 0.15)',
+      bgHover: 'rgba(255, 215, 0, 0.25)',
+      bgSelected: 'rgba(255, 215, 0, 0.25)',
+      text: '#ffd700',
+      shadow: 'rgba(255, 215, 0, 0.4)',
+      shadowGlow: 'rgba(255, 215, 0, 0.2)',
+      shadowHover: 'rgba(255, 215, 0, 0.3)'
+    }
+  } else if (gradeClass === 'grade-red') {
+    return {
+      border: '#ff4444',
+      bg: 'rgba(255, 68, 68, 0.15)',
+      bgHover: 'rgba(255, 68, 68, 0.25)',
+      bgSelected: 'rgba(255, 68, 68, 0.25)',
+      text: '#ff4444',
+      shadow: 'rgba(255, 68, 68, 0.4)',
+      shadowGlow: 'rgba(255, 68, 68, 0.2)',
+      shadowHover: 'rgba(255, 68, 68, 0.3)'
+    }
+  }
+  return {
+    border: 'rgba(255, 255, 255, 0.2)',
+    bg: 'rgba(255, 255, 255, 0.05)',
+    bgHover: 'rgba(255, 255, 255, 0.1)',
+    bgSelected: 'rgba(255, 255, 255, 0.1)',
+    text: '#fff',
+    shadow: 'rgba(255, 255, 255, 0.2)',
+    shadowGlow: 'rgba(255, 255, 255, 0.1)',
+    shadowHover: 'rgba(255, 255, 255, 0.15)'
+  }
 }
 
 
@@ -169,6 +218,8 @@ export default function Landing({ user }) {
   const [gatesPassed, setGatesPassed] = useState([])
   const [violations, setViolations] = useState([])
   const [landingResult, setLandingResult] = useState(null)
+  const [selectedPhase, setSelectedPhase] = useState(null)
+  const [selectedPathFollowingPhase, setSelectedPathFollowingPhase] = useState(null)
   const hasBeenSaved = useRef(false)
   const previousPhase = useRef(LANDING_PHASES.NONE)
   const lastGateCheck = useRef({})
@@ -478,29 +529,51 @@ export default function Landing({ user }) {
           vs_fpm: data.vs_fpm
         }])
 
+        if (!runway || !runway.threshold || !runway.oppositeEnd) {
+          return // Skip if no runway is selected
+        }
+
         const distToThreshold = calculateDistance(
           data.lat, data.lon,
           runway.threshold.lat, runway.threshold.lon
         )
         if (distToThreshold < 5) {
           const targetGlide = GLIDEPATH.getTargetAltitude(distToThreshold)
-          const altDev = targetGlide ? Math.abs(data.alt_ft - targetGlide.msl) : 0
+          const altDev = targetGlide ? (data.alt_ft - targetGlide.msl) : 0
           const targetSpeed = vref + 5
-          const speedDev = Math.abs(data.ias_kt - targetSpeed)
-          const bankDev = Math.abs(data.bank_deg || 0)
+          const speedDev = data.ias_kt - targetSpeed
+          const bankAbs = Math.abs(data.bank_deg || 0)
           const targetPitch = -3
-          const pitchDev = Math.abs((data.pitch_deg || 0) - targetPitch)
+          const pitchDev = (data.pitch_deg || 0) - targetPitch
+          const pitchAbs = Math.abs(data.pitch_deg || 0)
+          
+          const headingDev = Math.abs(normalizeAngle(data.hdg_true - runway.heading))
+          let samplePhase = phase
+          
+          if (phase === LANDING_PHASES.FINAL && headingDev > 30) {
+            samplePhase = LANDING_PHASES.BASE
+          }
+          
+          const lateralDev = Math.abs(calculateLateralDeviation(
+            data.lat, data.lon,
+            runway.threshold.lat, runway.threshold.lon,
+            runway.oppositeEnd.lat, runway.oppositeEnd.lon
+          ))
 
-          landingDeviations.current.maxAltDev = Math.max(landingDeviations.current.maxAltDev, altDev)
-          landingDeviations.current.maxSpeedDev = Math.max(landingDeviations.current.maxSpeedDev, speedDev)
-          landingDeviations.current.maxBankDev = Math.max(landingDeviations.current.maxBankDev, bankDev)
-          landingDeviations.current.maxPitchDev = Math.max(landingDeviations.current.maxPitchDev, pitchDev)
+          landingDeviations.current.maxAltDev = Math.max(landingDeviations.current.maxAltDev, Math.abs(altDev))
+          landingDeviations.current.maxSpeedDev = Math.max(landingDeviations.current.maxSpeedDev, Math.abs(speedDev))
+          landingDeviations.current.maxBankDev = Math.max(landingDeviations.current.maxBankDev, bankAbs)
+          landingDeviations.current.maxPitchDev = Math.max(landingDeviations.current.maxPitchDev, Math.abs(pitchDev))
           landingDeviations.current.samples.push({
             timestamp: now,
             altDev,
+            lateralDev,
             speedDev,
-            bankDev,
-            pitchDev
+            bankDev: bankAbs,
+            pitchDev,
+            bankAbs,
+            pitchAbs,
+            phase: samplePhase
           })
         }
       }
@@ -601,6 +674,14 @@ export default function Landing({ user }) {
           
           // Sample deviations every ~0.5 seconds (for max tracking and data storage)
           if (!lastDeviation || now - lastDeviation.timestamp >= 500) {
+            const currentPhaseForSample = detectLandingPhase(data, runway, previousPhase.current)
+            const headingDev = Math.abs(normalizeAngle(data.hdg_true - runway.heading))
+            let samplePhase = currentPhaseForSample
+            
+            if (currentPhaseForSample === LANDING_PHASES.FINAL && headingDev > 30) {
+              samplePhase = LANDING_PHASES.BASE
+            }
+            
             setPathFollowingTracking(prev => ({
               ...prev,
               maxAltDev: Math.max(prev.maxAltDev, Math.abs(altDev)),
@@ -615,6 +696,9 @@ export default function Landing({ user }) {
                 speedDev,
                 bankDev,
                 pitchDev,
+                bankAbs: Math.abs(data.bank_deg || 0),
+                pitchAbs: Math.abs(data.pitch_deg || 0),
+                phase: samplePhase,
                 closestPointAlt: targetGlidepath ? targetGlidepath.msl : closestPoint.alt,
                 closestPointSpeed: closestPoint.airspeed
               }],
@@ -954,57 +1038,67 @@ export default function Landing({ user }) {
     if (!hasBeenSaved.current) {
       hasBeenSaved.current = true
       
-      const { maxAltDev, maxSpeedDev, maxBankDev, maxPitchDev, samples } = landingDeviations.current
+      const { samples } = landingDeviations.current
 
       // Validation: Prevent saving invalid results with all zeros
-      // This can happen if auto-start triggers but no deviation data is collected
-      const hasNoData = maxAltDev === 0 && maxSpeedDev === 0 && maxBankDev === 0 && maxPitchDev === 0
       const hasNoSamples = !samples || samples.length === 0
       
-      if (hasNoData || hasNoSamples) {
+      if (hasNoSamples) {
         console.warn('⚠️ Landing completion blocked: No deviation data collected. This may be due to auto-start triggering incorrectly.')
         setTracking(false)
         setState(connected ? 'ready' : 'disconnected')
         setCurrentPhase(LANDING_PHASES.NONE)
         setNearRunwayButNotPath(false)
-        hasBeenSaved.current = false // Reset so it can be saved if manually triggered again
+        hasBeenSaved.current = false
         return
       }
 
+      // Grade using phase-based system
+      const gradeData = gradeLandingPathPhaseBased({
+        samples: samples,
+        skillLevel: pathFollowingSkillLevel,
+        runway
+      })
+
+      // Legacy busted flags for backward compatibility
       const busted = {
-        altitude: maxAltDev > 100,
-        speed: maxSpeedDev > 10,
-        bank: maxBankDev > 5,
-        pitch: maxPitchDev > 3
+        altitude: gradeData.bust.final || gradeData.bust.threshold,
+        speed: gradeData.bust.final || gradeData.bust.threshold,
+        bank: gradeData.bust.final || gradeData.bust.threshold,
+        pitch: gradeData.bust.final || gradeData.bust.threshold
       }
 
-      const gradeData = gradePathFollowing({
-        maxAltDev,
-        maxLateralDev: 0,
-        maxSpeedDev,
-        maxBankDev,
-        maxPitchDev,
-        busted: { ...busted, lateral: false },
-        skillLevel: pathFollowingSkillLevel
+      // Calculate overall max deviations for display
+      const overallMaxDeviations = {
+        altitude: 0,
+        lateral: 0,
+        speed: 0,
+        bank: 0,
+        pitch: 0
+      }
+
+      Object.values(gradeData.maxByPhase || {}).forEach(phaseMetrics => {
+        overallMaxDeviations.altitude = Math.max(overallMaxDeviations.altitude, phaseMetrics.altitudeFt || 0)
+        overallMaxDeviations.lateral = Math.max(overallMaxDeviations.lateral, (phaseMetrics.lateralFt || 0) / 6076)
+        overallMaxDeviations.speed = Math.max(overallMaxDeviations.speed, phaseMetrics.speedKt || 0)
+        overallMaxDeviations.bank = Math.max(overallMaxDeviations.bank, phaseMetrics.bankDeg || 0)
+        overallMaxDeviations.pitch = Math.max(overallMaxDeviations.pitch, phaseMetrics.pitchDeg || 0)
       })
       
       const result = {
         grade: gradeData.finalGrade,
         gradeDetails: {
-          ...gradeData,
-          breakdown: {
-            altitude: gradeData.breakdown.altitude,
-            speed: gradeData.breakdown.speed,
-            bank: gradeData.breakdown.bank,
-            pitch: gradeData.breakdown.pitch
-          }
+          finalGrade: gradeData.finalGrade,
+          baseFinalGrade: gradeData.baseFinalGrade,
+          phaseGrades: gradeData.phaseGrades,
+          breakdown: gradeData.breakdown,
+          maxByPhase: gradeData.maxByPhase,
+          bust: gradeData.bust,
+          notes: gradeData.notes,
+          penaltySteps: gradeData.penaltySteps,
+          penaltyReasons: gradeData.penaltyReasons
         },
-        maxDeviations: {
-          altitude: maxAltDev,
-          speed: maxSpeedDev,
-          bank: maxBankDev,
-          pitch: maxPitchDev
-        },
+        maxDeviations: overallMaxDeviations,
         busted,
         skillLevel: pathFollowingSkillLevel,
         touchdown: touchdownData.current,
@@ -1055,50 +1149,66 @@ export default function Landing({ user }) {
       deviations: pathFollowingTracking.deviations.length
     })
     
-    // Grade based on deviations using letter grades
-    // Tolerances for busted flags: Altitude ±100ft, Lateral ±0.2 NM, Speed ±10kt, Bank ±5°, Pitch ±3°
+    // Grade using phase-based system
+    const gradeData = gradeLandingPathPhaseBased({
+      samples: pathFollowingTracking.samples,
+      skillLevel: pathFollowingSkillLevel,
+      runway
+    })
+    
+    // Legacy busted flags for backward compatibility
     const busted = {
-      altitude: pathFollowingTracking.maxAltDev > 100,
-      lateral: pathFollowingTracking.maxLateralDev > 0.2,
-      speed: pathFollowingTracking.maxSpeedDev > 10,
-      bank: pathFollowingTracking.maxBankDev > 5,
-      pitch: pathFollowingTracking.maxPitchDev > 3
+      altitude: gradeData.bust.final || gradeData.bust.threshold,
+      lateral: gradeData.bust.final || gradeData.bust.threshold,
+      speed: gradeData.bust.final || gradeData.bust.threshold,
+      bank: gradeData.bust.final || gradeData.bust.threshold,
+      pitch: gradeData.bust.final || gradeData.bust.threshold
     }
     
     const bustedCount = Object.values(busted).filter(v => v).length
     
-    // Calculate letter grades using grading system
-    const gradeData = gradePathFollowing({
-      maxAltDev: pathFollowingTracking.maxAltDev,
-      maxLateralDev: pathFollowingTracking.maxLateralDev,
-      maxSpeedDev: pathFollowingTracking.maxSpeedDev,
-      maxBankDev: pathFollowingTracking.maxBankDev,
-      maxPitchDev: pathFollowingTracking.maxPitchDev,
-      busted,
-      skillLevel: pathFollowingSkillLevel
+    // Calculate overall max deviations for display
+    const overallMaxDeviations = {
+      altitude: 0,
+      lateral: 0,
+      speed: 0,
+      bank: 0,
+      pitch: 0
+    }
+    
+    Object.values(gradeData.maxByPhase || {}).forEach(phaseMetrics => {
+      overallMaxDeviations.altitude = Math.max(overallMaxDeviations.altitude, phaseMetrics.altitudeFt || 0)
+      overallMaxDeviations.lateral = Math.max(overallMaxDeviations.lateral, (phaseMetrics.lateralFt || 0) / 6076)
+      overallMaxDeviations.speed = Math.max(overallMaxDeviations.speed, phaseMetrics.speedKt || 0)
+      overallMaxDeviations.bank = Math.max(overallMaxDeviations.bank, phaseMetrics.bankDeg || 0)
+      overallMaxDeviations.pitch = Math.max(overallMaxDeviations.pitch, phaseMetrics.pitchDeg || 0)
     })
     
     const result = {
       grade: gradeData.finalGrade,
-      gradeDetails: gradeData,
+      gradeDetails: {
+        finalGrade: gradeData.finalGrade,
+        baseFinalGrade: gradeData.baseFinalGrade,
+        phaseGrades: gradeData.phaseGrades,
+        breakdown: gradeData.breakdown,
+        maxByPhase: gradeData.maxByPhase,
+        bust: gradeData.bust,
+        notes: gradeData.notes,
+        penaltySteps: gradeData.penaltySteps,
+        penaltyReasons: gradeData.penaltyReasons
+      },
       pathName: pathFollowingTracking.pathName,
       runway: {
         id: selectedRunway,
         name: getRunwayDisplayName(selectedRunway, customRunways)
       },
-      maxDeviations: {
-        altitude: pathFollowingTracking.maxAltDev,
-        lateral: pathFollowingTracking.maxLateralDev,
-        speed: pathFollowingTracking.maxSpeedDev,
-        bank: pathFollowingTracking.maxBankDev,
-        pitch: pathFollowingTracking.maxPitchDev
-      },
+      maxDeviations: overallMaxDeviations,
       busted,
       bustedCount,
       samples: pathFollowingTracking.samples,
       deviations: pathFollowingTracking.deviations,
-      flightPath: flightPath, // Include flight path for 3D playback
-      referencePath: pathFollowingTracking.referencePath, // Include reference path for 3D comparison
+      flightPath: flightPath,
+      referencePath: pathFollowingTracking.referencePath,
       skillLevel: pathFollowingSkillLevel,
       timestamp: new Date().toISOString()
     }
@@ -1365,168 +1475,129 @@ export default function Landing({ user }) {
   if (showGradingScale) {
     return (
       <div className="modal-overlay" onClick={() => setShowGradingScale(false)}>
-        <div className="modal-content grading-scale-modal" onClick={(e) => e.stopPropagation()}>
-          <h2>Path Following Grading Scale - {pathFollowingSkillLevel === 'acs' ? 'ACS' : pathFollowingSkillLevel.charAt(0).toUpperCase() + pathFollowingSkillLevel.slice(1)}</h2>
+        <div className="modal-content grading-scale-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '90vw', maxHeight: '90vh', overflow: 'auto' }}>
+          <h2>Phase-Based Landing Grading Scale - {pathFollowingSkillLevel === 'acs' ? 'ACS' : pathFollowingSkillLevel.charAt(0).toUpperCase() + pathFollowingSkillLevel.slice(1)}</h2>
           {(() => {
-            // Import the thresholds function
-            const getThresholds = (skillLevel) => {
-              const normalized = (skillLevel || 'acs').toLowerCase()
-              const thresholds = {
-                acs: {
-                  altitude: { Aplus: 20, A: 40, Aminus: 60, Bplus: 80, B: 100, Bminus: 120, Cplus: 150, C: 180, Cminus: 220, Dplus: 250, D: 300, Dminus: 350 },
-                  lateral: { Aplus: 0.05, A: 0.1, Aminus: 0.15, Bplus: 0.2, B: 0.25, Bminus: 0.3, Cplus: 0.4, C: 0.5, Cminus: 0.6, Dplus: 0.7, D: 0.8, Dminus: 0.9 },
-                  speed: { Aplus: 2, A: 4, Aminus: 6, Bplus: 8, B: 10, Bminus: 12, Cplus: 15, C: 18, Cminus: 22, Dplus: 25, D: 30, Dminus: 35 },
-                  bank: { Aplus: 1, A: 2, Aminus: 3, Bplus: 4, B: 5, Bminus: 6, Cplus: 8, C: 10, Cminus: 12, Dplus: 15, D: 18, Dminus: 22 },
-                  pitch: { Aplus: 0.5, A: 1, Aminus: 1.5, Bplus: 2, B: 2.5, Bminus: 3, Cplus: 4, C: 5, Cminus: 6, Dplus: 7, D: 8, Dminus: 10 }
-                },
-                novice: {
-                  altitude: { Aplus: 40, A: 80, Aminus: 120, Bplus: 160, B: 200, Bminus: 240, Cplus: 280, C: 320, Cminus: 360, Dplus: 400, D: 450, Dminus: 500 },
-                  lateral: { Aplus: 0.1, A: 0.2, Aminus: 0.3, Bplus: 0.4, B: 0.5, Bminus: 0.6, Cplus: 0.7, C: 0.8, Cminus: 1.0, Dplus: 1.2, D: 1.4, Dminus: 1.6 },
-                  speed: { Aplus: 4, A: 8, Aminus: 12, Bplus: 16, B: 20, Bminus: 24, Cplus: 28, C: 32, Cminus: 36, Dplus: 40, D: 45, Dminus: 50 },
-                  bank: { Aplus: 2, A: 4, Aminus: 6, Bplus: 8, B: 10, Bminus: 12, Cplus: 15, C: 18, Cminus: 22, Dplus: 25, D: 30, Dminus: 35 },
-                  pitch: { Aplus: 1, A: 2, Aminus: 3, Bplus: 4, B: 5, Bminus: 6, Cplus: 8, C: 10, Cminus: 12, Dplus: 15, D: 18, Dminus: 22 }
-                },
-                beginner: {
-                  altitude: { Aplus: 150, A: 250, Aminus: 350, Bplus: 450, B: 550, Bminus: 650, Cplus: 750, C: 850, Cminus: 1000, Dplus: 1200, D: 1500, Dminus: 1800 },
-                  lateral: { Aplus: 0.3, A: 0.5, Aminus: 0.7, Bplus: 0.9, B: 1.2, Bminus: 1.5, Cplus: 1.8, C: 2.2, Cminus: 2.6, Dplus: 3.0, D: 3.5, Dminus: 4.0 },
-                  speed: { Aplus: 12, A: 18, Aminus: 24, Bplus: 30, B: 36, Bminus: 42, Cplus: 48, C: 54, Cminus: 60, Dplus: 70, D: 80, Dminus: 90 },
-                  bank: { Aplus: 6, A: 10, Aminus: 14, Bplus: 18, B: 22, Bminus: 26, Cplus: 30, C: 35, Cminus: 40, Dplus: 45, D: 50, Dminus: 55 },
-                  pitch: { Aplus: 3, A: 5, Aminus: 7, Bplus: 9, B: 12, Bminus: 15, Cplus: 18, C: 22, Cminus: 26, Dplus: 30, D: 35, Dminus: 40 }
-                }
-              }
-              if (normalized === 'acs') return thresholds.acs
-              if (normalized === 'novice') return thresholds.novice
-              if (normalized === 'beginner') return thresholds.beginner
-              return thresholds.acs
+            const skillLevel = pathFollowingSkillLevel || 'acs'
+            const multiplier = SKILL_MULTIPLIERS[skillLevel] || SKILL_MULTIPLIERS.acs
+            const grades = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-']
+            const phases = ['downwind', 'base', 'final', 'threshold']
+            const phaseNames = { downwind: 'Downwind', base: 'Base', final: 'Final', threshold: 'Threshold' }
+            const metrics = ['altitude', 'lateral', 'speed', 'bank', 'pitch']
+            const metricNames = { altitude: 'Altitude', lateral: 'Lateral', speed: 'Speed', bank: 'Bank', pitch: 'Pitch' }
+            const metricUnits = { altitude: 'ft', lateral: 'ft', speed: 'kt', bank: '°', pitch: '°' }
+
+            const getThreshold = (phase, metric, grade) => {
+              const baseValue = ACS_THRESHOLDS[phase]?.[metric]?.[grade]
+              if (baseValue === undefined || baseValue === Infinity) return Infinity
+              return Math.round(baseValue * multiplier[metric])
             }
 
-            const thresholds = getThresholds(pathFollowingSkillLevel)
-            const grades = ['A+', 'A', 'A-', 'B+', 'B', 'B-', 'C+', 'C', 'C-', 'D+', 'D', 'D-']
-
             return (
-              <div className="grading-scale-content">
-                <div className="grading-scale-section">
-                  <h3>Altitude</h3>
-                  <p className="grading-scale-note">Maximum deviation from reference path altitude</p>
-                  <table className="grading-table">
-                    <thead>
-                      <tr>
-                        <th>Grade</th>
-                        <th>Max Dev (ft)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {grades.map(grade => {
-                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
-                        return (
-                          <tr key={grade}>
-                            <td className="grade-cell">{grade}</td>
-                            <td>{thresholds.altitude[gradeKey]} ft</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+              <div>
+                <div style={{ marginBottom: '24px', width: '100%' }}>
+                  <div style={{ 
+                    padding: '20px', 
+                    background: 'linear-gradient(135deg, rgba(26, 31, 58, 0.8) 0%, rgba(40, 50, 80, 0.8) 100%)',
+                    borderRadius: '8px', 
+                    border: '2px solid rgba(74, 158, 255, 0.3)',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1)',
+                    minWidth: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '16px'
+                  }}>
+                    <h3 style={{ 
+                      marginTop: 0, 
+                      marginBottom: '4px', 
+                      color: '#fff', 
+                      fontSize: '1.2rem',
+                      fontWeight: 'bold',
+                      textShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+                      borderBottom: '2px solid rgba(74, 158, 255, 0.5)',
+                      paddingBottom: '8px'
+                    }}>
+                      Scoring System
+                    </h3>
+                    
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+                      <div>
+                        <strong style={{ color: '#4a9eff', fontSize: '0.95rem', display: 'block', marginBottom: '6px' }}>Phase Weights:</strong>
+                        <ul style={{ margin: 0, paddingLeft: '20px', color: '#ccc', fontSize: '0.9rem', lineHeight: '1.6' }}>
+                          <li>Downwind: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(PHASE_WEIGHTS.downwind * 100).toFixed(0)}%</span></li>
+                          <li>Base: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(PHASE_WEIGHTS.base * 100).toFixed(0)}%</span></li>
+                          <li>Final: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(PHASE_WEIGHTS.final * 100).toFixed(0)}%</span></li>
+                          <li>Threshold: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(PHASE_WEIGHTS.threshold * 100).toFixed(0)}%</span></li>
+                        </ul>
+                      </div>
+                      <div>
+                        <strong style={{ color: '#4a9eff', fontSize: '0.95rem', display: 'block', marginBottom: '6px' }}>Metric Weights (within each phase):</strong>
+                        <ul style={{ margin: 0, paddingLeft: '20px', color: '#ccc', fontSize: '0.9rem', lineHeight: '1.6' }}>
+                          <li>Lateral: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(METRIC_WEIGHTS.lateral * 100).toFixed(0)}%</span></li>
+                          <li>Altitude: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(METRIC_WEIGHTS.altitude * 100).toFixed(0)}%</span></li>
+                          <li>Speed: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(METRIC_WEIGHTS.speed * 100).toFixed(0)}%</span></li>
+                          <li>Bank: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(METRIC_WEIGHTS.bank * 100).toFixed(0)}%</span></li>
+                          <li>Pitch: <span style={{ color: '#fff', fontWeight: 'bold' }}>{(METRIC_WEIGHTS.pitch * 100).toFixed(0)}%</span></li>
+                        </ul>
+                      </div>
+                    </div>
+
+                    <div style={{ 
+                      marginTop: '8px',
+                      padding: '12px',
+                      backgroundColor: 'rgba(255, 193, 7, 0.15)',
+                      borderRadius: '6px',
+                      border: '1px solid rgba(255, 193, 7, 0.4)',
+                      borderLeft: '4px solid #ffc107'
+                    }}>
+                      <strong style={{ color: '#ffc107', fontSize: '0.95rem', display: 'block', marginBottom: '8px' }}>Important Notes:</strong>
+                      <ul style={{ margin: 0, paddingLeft: '20px', color: '#fff', fontSize: '0.85rem', lineHeight: '1.8' }}>
+                        <li>Grading is <strong>phase-based</strong>: Each phase is graded separately, then combined using phase weights.</li>
+                        <li><strong>Bank and Pitch</strong> are scored as <strong>absolute angles</strong>, not deviations.</li>
+                        <li><strong>Final + Threshold</strong> account for 70% of final grade (stabilized approach emphasis).</li>
+                        <li><strong>Bust Rules:</strong> FINAL bust (alt &gt;400ft, lateral &gt;2127ft, speed &gt;20kt, bank &gt;35°) caps grade at C-. THRESHOLD bust (alt &gt;200ft, lateral &gt;600ft, speed &gt;15kt, bank &gt;25°) caps grade at D.</li>
+                      </ul>
+                    </div>
+                  </div>
                 </div>
 
-                <div className="grading-scale-section">
-                  <h3>Lateral</h3>
-                  <p className="grading-scale-note">Maximum lateral deviation from reference path</p>
-                  <table className="grading-table">
-                    <thead>
-                      <tr>
-                        <th>Grade</th>
-                        <th>Max Dev (NM)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {grades.map(grade => {
-                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
-                        return (
-                          <tr key={grade}>
-                            <td className="grade-cell">{grade}</td>
-                            <td>{thresholds.lateral[gradeKey]}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="grading-scale-section">
-                  <h3>Speed</h3>
-                  <p className="grading-scale-note">Maximum deviation from reference path airspeed</p>
-                  <table className="grading-table">
-                    <thead>
-                      <tr>
-                        <th>Grade</th>
-                        <th>Max Dev (kt)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {grades.map(grade => {
-                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
-                        return (
-                          <tr key={grade}>
-                            <td className="grade-cell">{grade}</td>
-                            <td>{thresholds.speed[gradeKey]}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="grading-scale-section">
-                  <h3>Bank Angle</h3>
-                  <p className="grading-scale-note">Maximum deviation from reference path bank angle</p>
-                  <table className="grading-table">
-                    <thead>
-                      <tr>
-                        <th>Grade</th>
-                        <th>Max Dev (°)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {grades.map(grade => {
-                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
-                        return (
-                          <tr key={grade}>
-                            <td className="grade-cell">{grade}</td>
-                            <td>{thresholds.bank[gradeKey]}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="grading-scale-section">
-                  <h3>Pitch Angle</h3>
-                  <p className="grading-scale-note">Maximum deviation from reference path pitch angle</p>
-                  <table className="grading-table">
-                    <thead>
-                      <tr>
-                        <th>Grade</th>
-                        <th>Max Dev (°)</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {grades.map(grade => {
-                        const gradeKey = grade.replace('+', 'plus').replace('-', 'minus')
-                        return (
-                          <tr key={grade}>
-                            <td className="grade-cell">{grade}</td>
-                            <td>{thresholds.pitch[gradeKey]}</td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="grading-scale-note grading-scale-final-note">
-                  <strong>Note:</strong> Final grade is the worst grade across all categories. Busted tolerances (altitude ±100ft, lateral ±0.2NM, speed ±10kt, bank ±5°, pitch ±3°) result in grade penalties.
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px', width: '100%' }}>
+                  {phases.map(phase => (
+                  <div key={phase} className="grading-scale-section" style={{ border: '1px solid rgba(255, 255, 255, 0.1)', padding: '16px', borderRadius: '4px', backgroundColor: 'rgba(26, 31, 58, 0.4)' }}>
+                    <h3 style={{ marginTop: 0, color: '#fff' }}>
+                      {phaseNames[phase]} Phase (Weight: {(PHASE_WEIGHTS[phase] * 100).toFixed(0)}%)
+                    </h3>
+                    {metrics.map(metric => (
+                      <div key={metric} style={{ marginBottom: '20px' }}>
+                        <h4 style={{ fontSize: '0.95rem', marginBottom: '4px', color: '#ccc' }}>
+                          {metricNames[metric]} (Weight: {(METRIC_WEIGHTS[metric] * 100).toFixed(0)}%)
+                        </h4>
+                        <p className="grading-scale-note" style={{ fontSize: '0.85rem', marginBottom: '8px' }}>
+                          Maximum {metric === 'bank' || metric === 'pitch' ? 'absolute ' : ''}{metricNames[metric].toLowerCase()} {metric === 'lateral' ? 'deviation' : 'deviation'} in {phaseNames[phase].toLowerCase()} phase
+                        </p>
+                        <table className="grading-table" style={{ fontSize: '0.9rem' }}>
+                          <thead>
+                            <tr>
+                              <th>Grade</th>
+                              <th>Max ({metricUnits[metric]})</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {grades.map(grade => {
+                              const threshold = getThreshold(phase, metric, grade)
+                              return (
+                                <tr key={grade}>
+                                  <td className={`grade-cell ${getGradeColorClass(grade)}`}>{grade}</td>
+                                  <td>{threshold === Infinity ? '—' : threshold}</td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                  ))}
                 </div>
               </div>
             )
@@ -2017,35 +2088,216 @@ export default function Landing({ user }) {
                 </div>
 
                 {landingResult.gradeDetails && (
-                  <div className="grade-breakdown">
-                    <h3>Grade Breakdown</h3>
-                    <div className="breakdown-grid">
-                      <div className="breakdown-item">
-                        <span>Altitude:</span>
-                        <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.altitude)}>
-                          {landingResult.gradeDetails.breakdown.altitude}
-                        </span>
+                  <>
+                    {landingResult.gradeDetails.phaseGrades && Object.keys(landingResult.gradeDetails.phaseGrades).length > 0 ? (
+                      <div className="grade-breakdown">
+                        <h3 style={{ marginBottom: '16px', display: 'block', width: '100%' }}>Phase Grades</h3>
+                        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', width: '100%' }}>
+                          {Object.entries(landingResult.gradeDetails.phaseGrades).map(([phase, grade]) => {
+                            const phaseName = phase.charAt(0).toUpperCase() + phase.slice(1)
+                            const isSelected = selectedPhase === phase
+                            const colors = getGradeColors(grade)
+                            return (
+                              <button
+                                key={phase}
+                                onClick={() => setSelectedPhase(isSelected ? null : phase)}
+                                className={`phase-button ${getGradeColorClass(grade)} ${isSelected ? 'selected' : ''}`}
+                                style={{
+                                  padding: '10px 18px',
+                                  borderRadius: '8px',
+                                  border: `2px solid ${isSelected ? colors.border : colors.border}`,
+                                  backgroundColor: isSelected ? colors.bgSelected : colors.bg,
+                                  color: '#fff',
+                                  cursor: 'pointer',
+                                  fontWeight: isSelected ? '600' : '500',
+                                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '10px',
+                                  fontSize: '14px',
+                                  boxShadow: isSelected 
+                                    ? `0 0 0 1px ${colors.shadow}, 0 4px 12px ${colors.shadowGlow}`
+                                    : '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                  transform: isSelected ? 'translateY(-1px)' : 'translateY(0)',
+                                  position: 'relative',
+                                  overflow: 'hidden'
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (!isSelected) {
+                                    e.currentTarget.style.backgroundColor = colors.bgHover
+                                    e.currentTarget.style.transform = 'translateY(-2px)'
+                                    e.currentTarget.style.boxShadow = `0 4px 12px ${colors.shadowHover}`
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (!isSelected) {
+                                    e.currentTarget.style.backgroundColor = colors.bg
+                                    e.currentTarget.style.transform = 'translateY(0)'
+                                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)'
+                                  }
+                                }}
+                              >
+                                <span style={{ 
+                                  fontSize: '13px',
+                                  letterSpacing: '0.3px',
+                                  opacity: 0.9
+                                }}>
+                                  {phaseName}
+                                </span>
+                                <span 
+                                  className={getGradeColorClass(grade)} 
+                                  style={{ 
+                                    fontWeight: '700',
+                                    fontSize: '15px',
+                                    fontFamily: "'Consolas', 'Courier New', monospace",
+                                    color: colors.text,
+                                    textShadow: `0 0 8px ${colors.shadow}`,
+                                    background: 'transparent',
+                                    border: 'none',
+                                    padding: 0,
+                                    boxShadow: 'none'
+                                  }}
+                                >
+                                  {grade}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {selectedPhase && landingResult.gradeDetails.breakdown?.[selectedPhase] && (
+                          <div style={{ padding: '16px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                            <h4 style={{ marginBottom: '12px', fontSize: '1.1em' }}>
+                              {selectedPhase.charAt(0).toUpperCase() + selectedPhase.slice(1)} Breakdown
+                            </h4>
+                            <div className="breakdown-grid">
+                              {Object.entries(landingResult.gradeDetails.breakdown[selectedPhase]).map(([category, categoryGrade]) => {
+                                const categoryNames = {
+                                  altitude: 'Altitude',
+                                  lateral: 'Lateral',
+                                  speed: 'Speed',
+                                  bank: 'Bank',
+                                  pitch: 'Pitch'
+                                }
+                                const maxByPhase = landingResult.gradeDetails.maxByPhase?.[selectedPhase]
+                                let maxDeviation = null
+                                let unit = ''
+                                let showSign = false
+                                
+                                if (maxByPhase) {
+                                  if (category === 'altitude') {
+                                    maxDeviation = maxByPhase.altitudeFtSigned !== undefined ? maxByPhase.altitudeFtSigned : maxByPhase.altitudeFt
+                                    unit = 'ft'
+                                    showSign = maxByPhase.altitudeFtSigned !== undefined
+                                  } else if (category === 'lateral') {
+                                    maxDeviation = maxByPhase.lateralFt
+                                    unit = 'ft'
+                                    showSign = false
+                                  } else if (category === 'speed') {
+                                    maxDeviation = maxByPhase.speedKtSigned !== undefined ? maxByPhase.speedKtSigned : maxByPhase.speedKt
+                                    unit = 'kt'
+                                    showSign = true
+                                  } else if (category === 'bank') {
+                                    maxDeviation = maxByPhase.bankDeg
+                                    unit = '°'
+                                    showSign = true
+                                  } else if (category === 'pitch') {
+                                    maxDeviation = maxByPhase.pitchDegSigned !== undefined ? maxByPhase.pitchDegSigned : maxByPhase.pitchDeg
+                                    unit = '°'
+                                    showSign = maxByPhase.pitchDegSigned !== undefined
+                                  }
+                                }
+                                
+                                return (
+                                  <div key={category} className="breakdown-item">
+                                    <span>{categoryNames[category] || category}:</span>
+                                    <span>
+                                      <span className={getGradeColorClass(categoryGrade)}>
+                                        {categoryGrade}
+                                      </span>
+                                      {maxDeviation !== null && maxDeviation !== undefined && (
+                                        <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                          ({showSign ? ((maxDeviation >= 0 ? '+' : '') + Math.round(Math.abs(maxDeviation))) : Math.round(maxDeviation)}{unit})
+                                        </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="breakdown-item">
-                        <span>Speed:</span>
-                        <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.speed)}>
-                          {landingResult.gradeDetails.breakdown.speed}
-                        </span>
+                    ) : (
+                      <div className="grade-breakdown">
+                        <h3>Grade Breakdown</h3>
+                        <div className="breakdown-grid">
+                          {landingResult.gradeDetails.breakdown && typeof landingResult.gradeDetails.breakdown === 'object' && !landingResult.gradeDetails.breakdown.downwind ? (
+                            <>
+                              <div className="breakdown-item">
+                                <span>Altitude:</span>
+                                <span>
+                                  <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.altitude)}>
+                                    {landingResult.gradeDetails.breakdown.altitude}
+                                  </span>
+                                  {landingResult.maxDeviations?.altitude !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(landingResult.maxDeviations.altitude >= 0 ? '+' : '') + Math.round(landingResult.maxDeviations.altitude || 0)} ft)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="breakdown-item">
+                                <span>Speed:</span>
+                                <span>
+                                  <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.speed)}>
+                                    {landingResult.gradeDetails.breakdown.speed}
+                                  </span>
+                                  {landingResult.maxDeviations?.speed !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(landingResult.maxDeviations.speed >= 0 ? '+' : '') + Math.round(landingResult.maxDeviations.speed || 0)} kt)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="breakdown-item">
+                                <span>Bank:</span>
+                                <span>
+                                  <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.bank)}>
+                                    {landingResult.gradeDetails.breakdown.bank}
+                                  </span>
+                                  {landingResult.maxDeviations?.bank !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(landingResult.maxDeviations.bank >= 0 ? '+' : '') + Math.round(landingResult.maxDeviations.bank || 0)}°)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="breakdown-item">
+                                <span>Pitch:</span>
+                                <span>
+                                  <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.pitch)}>
+                                    {landingResult.gradeDetails.breakdown.pitch}
+                                  </span>
+                                  {landingResult.maxDeviations?.pitch !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(landingResult.maxDeviations.pitch >= 0 ? '+' : '') + Math.round(landingResult.maxDeviations.pitch || 0)}°)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="breakdown-item">
-                        <span>Bank:</span>
-                        <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.bank)}>
-                          {landingResult.gradeDetails.breakdown.bank}
-                        </span>
+                    )}
+                    {landingResult.gradeDetails.notes && landingResult.gradeDetails.notes.length > 0 && (
+                      <div style={{ marginTop: '12px', padding: '8px', backgroundColor: 'rgba(255, 193, 7, 0.15)', borderRadius: '4px', fontSize: '0.9rem', border: '1px solid rgba(255, 193, 7, 0.3)', color: '#fff' }}>
+                        {landingResult.gradeDetails.notes.map((note, idx) => (
+                          <div key={idx}>{note}</div>
+                        ))}
                       </div>
-                      <div className="breakdown-item">
-                        <span>Pitch:</span>
-                        <span className={getGradeColorClass(landingResult.gradeDetails.breakdown.pitch)}>
-                          {landingResult.gradeDetails.breakdown.pitch}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                    )}
+                  </>
                 )}
 
                 {touchdownData.current && (
@@ -2094,38 +2346,6 @@ export default function Landing({ user }) {
                   </>
                 )}
 
-                {landingResult.maxDeviations && (
-                  <div className="touchdown-summary">
-                    <h3>Maximum Deviations</h3>
-                    <div className="touchdown-details">
-                      <div className="detail-row">
-                        <span>Altitude (from glidepath):</span>
-                        <span className={landingResult.busted?.altitude ? 'bad' : 'good'}>
-                          {Math.round(landingResult.maxDeviations.altitude)} ft
-                        </span>
-                      </div>
-                      <div className="detail-row">
-                        <span>Speed (from Vref+5):</span>
-                        <span className={landingResult.busted?.speed ? 'bad' : 'good'}>
-                          {Math.round(landingResult.maxDeviations.speed)} kt
-                        </span>
-                      </div>
-                      <div className="detail-row">
-                        <span>Bank Angle:</span>
-                        <span className={landingResult.busted?.bank ? 'bad' : 'good'}>
-                          {Math.round(landingResult.maxDeviations.bank)}°
-                        </span>
-                      </div>
-                      <div className="detail-row">
-                        <span>Pitch Angle:</span>
-                        <span className={landingResult.busted?.pitch ? 'bad' : 'good'}>
-                          {Math.round(landingResult.maxDeviations.pitch)}°
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 <button className="big-button reset" onClick={reset}>
                   Reset & Try Again
                 </button>
@@ -2146,78 +2366,224 @@ export default function Landing({ user }) {
                 </div>
 
                 {pathFollowingResult.gradeDetails && (
-                  <div className="grade-breakdown">
-                    <h3>Grade Breakdown</h3>
-                    <div className="breakdown-grid">
-                      <div className="breakdown-item">
-                        <span>Altitude:</span>
-                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.altitude)}>
-                          {pathFollowingResult.gradeDetails.breakdown.altitude}
-                        </span>
+                  <>
+                    {pathFollowingResult.gradeDetails.phaseGrades && Object.keys(pathFollowingResult.gradeDetails.phaseGrades).length > 0 ? (
+                      <div className="grade-breakdown">
+                        <h3 style={{ marginBottom: '16px', display: 'block', width: '100%' }}>Phase Grades</h3>
+                        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', width: '100%' }}>
+                          {Object.entries(pathFollowingResult.gradeDetails.phaseGrades).map(([phase, grade]) => {
+                            const phaseName = phase.charAt(0).toUpperCase() + phase.slice(1)
+                            const isSelected = selectedPathFollowingPhase === phase
+                            const colors = getGradeColors(grade)
+                            return (
+                              <button
+                                key={phase}
+                                onClick={() => setSelectedPathFollowingPhase(isSelected ? null : phase)}
+                                className={`phase-button ${getGradeColorClass(grade)} ${isSelected ? 'selected' : ''}`}
+                                style={{
+                                  padding: '10px 18px',
+                                  borderRadius: '8px',
+                                  border: `2px solid ${isSelected ? colors.border : colors.border}`,
+                                  backgroundColor: isSelected ? colors.bgSelected : colors.bg,
+                                  color: '#fff',
+                                  cursor: 'pointer',
+                                  fontWeight: isSelected ? '600' : '500',
+                                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '10px',
+                                  fontSize: '14px',
+                                  boxShadow: isSelected 
+                                    ? `0 0 0 1px ${colors.shadow}, 0 4px 12px ${colors.shadowGlow}`
+                                    : '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                  transform: isSelected ? 'translateY(-1px)' : 'translateY(0)',
+                                  position: 'relative',
+                                  overflow: 'hidden'
+                                }}
+                                onMouseEnter={(e) => {
+                                  if (!isSelected) {
+                                    e.currentTarget.style.backgroundColor = colors.bgHover
+                                    e.currentTarget.style.transform = 'translateY(-2px)'
+                                    e.currentTarget.style.boxShadow = `0 4px 12px ${colors.shadowHover}`
+                                  }
+                                }}
+                                onMouseLeave={(e) => {
+                                  if (!isSelected) {
+                                    e.currentTarget.style.backgroundColor = colors.bg
+                                    e.currentTarget.style.transform = 'translateY(0)'
+                                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)'
+                                  }
+                                }}
+                              >
+                                <span style={{ 
+                                  fontSize: '13px',
+                                  letterSpacing: '0.3px',
+                                  opacity: 0.9
+                                }}>
+                                  {phaseName}
+                                </span>
+                                <span 
+                                  className={getGradeColorClass(grade)} 
+                                  style={{ 
+                                    fontWeight: '700',
+                                    fontSize: '15px',
+                                    fontFamily: "'Consolas', 'Courier New', monospace",
+                                    color: colors.text,
+                                    textShadow: `0 0 8px ${colors.shadow}`,
+                                    background: 'transparent',
+                                    border: 'none',
+                                    padding: 0,
+                                    boxShadow: 'none'
+                                  }}
+                                >
+                                  {grade}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                        {selectedPathFollowingPhase && pathFollowingResult.gradeDetails.breakdown?.[selectedPathFollowingPhase] && (
+                          <div style={{ padding: '16px', backgroundColor: 'rgba(255, 255, 255, 0.05)', borderRadius: '6px', border: '1px solid rgba(255, 255, 255, 0.1)' }}>
+                            <h4 style={{ marginBottom: '12px', fontSize: '1.1em' }}>
+                              {selectedPathFollowingPhase.charAt(0).toUpperCase() + selectedPathFollowingPhase.slice(1)} Breakdown
+                            </h4>
+                            <div className="breakdown-grid">
+                              {Object.entries(pathFollowingResult.gradeDetails.breakdown[selectedPathFollowingPhase]).map(([category, categoryGrade]) => {
+                                const categoryNames = {
+                                  altitude: 'Altitude',
+                                  lateral: 'Lateral',
+                                  speed: 'Speed',
+                                  bank: 'Bank',
+                                  pitch: 'Pitch'
+                                }
+                                const maxByPhase = pathFollowingResult.gradeDetails.maxByPhase?.[selectedPathFollowingPhase]
+                                let maxDeviation = null
+                                let unit = ''
+                                
+                                if (maxByPhase) {
+                                  if (category === 'altitude') {
+                                    maxDeviation = maxByPhase.altitudeFt
+                                    unit = 'ft'
+                                  } else if (category === 'lateral') {
+                                    maxDeviation = maxByPhase.lateralFt
+                                    unit = 'ft'
+                                  } else if (category === 'speed') {
+                                    maxDeviation = maxByPhase.speedKt
+                                    unit = 'kt'
+                                  } else if (category === 'bank') {
+                                    maxDeviation = maxByPhase.bankDeg
+                                    unit = '°'
+                                  } else if (category === 'pitch') {
+                                    maxDeviation = maxByPhase.pitchDeg
+                                    unit = '°'
+                                  }
+                                }
+                                
+                                return (
+                                  <div key={category} className="breakdown-item">
+                                    <span>{categoryNames[category] || category}:</span>
+                                    <span>
+                                      <span className={getGradeColorClass(categoryGrade)}>
+                                        {categoryGrade}
+                                      </span>
+                                      {maxDeviation !== null && maxDeviation !== undefined && (
+                                        <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                          ({Math.round(maxDeviation)}{unit})
+                                        </span>
+                                      )}
+                                    </span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div className="breakdown-item">
-                        <span>Lateral:</span>
-                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.lateral)}>
-                          {pathFollowingResult.gradeDetails.breakdown.lateral}
-                        </span>
+                    ) : (
+                      <div className="grade-breakdown">
+                        <h3>Grade Breakdown</h3>
+                        <div className="breakdown-grid">
+                          {pathFollowingResult.gradeDetails.breakdown && typeof pathFollowingResult.gradeDetails.breakdown === 'object' && !pathFollowingResult.gradeDetails.breakdown.downwind ? (
+                            <>
+                              <div className="breakdown-item">
+                                <span>Altitude:</span>
+                                <span>
+                                  <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.altitude)}>
+                                    {pathFollowingResult.gradeDetails.breakdown.altitude}
+                                  </span>
+                                  {pathFollowingResult.maxDeviations?.altitude !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(pathFollowingResult.maxDeviations.altitude >= 0 ? '+' : '') + Math.round(pathFollowingResult.maxDeviations.altitude || 0)} ft)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="breakdown-item">
+                                <span>Lateral:</span>
+                                <span>
+                                  <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.lateral)}>
+                                    {pathFollowingResult.gradeDetails.breakdown.lateral}
+                                  </span>
+                                  {pathFollowingResult.maxDeviations?.lateral !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(pathFollowingResult.maxDeviations.lateral >= 0 ? '+' : '') + Math.round((pathFollowingResult.maxDeviations.lateral || 0) * 6076)} ft)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="breakdown-item">
+                                <span>Speed:</span>
+                                <span>
+                                  <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.speed)}>
+                                    {pathFollowingResult.gradeDetails.breakdown.speed}
+                                  </span>
+                                  {pathFollowingResult.maxDeviations?.speed !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(pathFollowingResult.maxDeviations.speed >= 0 ? '+' : '') + Math.round(pathFollowingResult.maxDeviations.speed || 0)} kt)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="breakdown-item">
+                                <span>Bank:</span>
+                                <span>
+                                  <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.bank)}>
+                                    {pathFollowingResult.gradeDetails.breakdown.bank}
+                                  </span>
+                                  {pathFollowingResult.maxDeviations?.bank !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(pathFollowingResult.maxDeviations.bank >= 0 ? '+' : '') + Math.round(pathFollowingResult.maxDeviations.bank || 0)}°)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                              <div className="breakdown-item">
+                                <span>Pitch:</span>
+                                <span>
+                                  <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.pitch)}>
+                                    {pathFollowingResult.gradeDetails.breakdown.pitch}
+                                  </span>
+                                  {pathFollowingResult.maxDeviations?.pitch !== undefined && (
+                                    <span style={{ marginLeft: '8px', fontSize: '0.9em', opacity: 0.8 }}>
+                                      ({(pathFollowingResult.maxDeviations.pitch >= 0 ? '+' : '') + Math.round(pathFollowingResult.maxDeviations.pitch || 0)}°)
+                                    </span>
+                                  )}
+                                </span>
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
                       </div>
-                      <div className="breakdown-item">
-                        <span>Speed:</span>
-                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.speed)}>
-                          {pathFollowingResult.gradeDetails.breakdown.speed}
-                        </span>
+                    )}
+                    {pathFollowingResult.gradeDetails.notes && pathFollowingResult.gradeDetails.notes.length > 0 && (
+                      <div style={{ marginTop: '12px', padding: '8px', backgroundColor: 'rgba(255, 193, 7, 0.15)', borderRadius: '4px', fontSize: '0.9rem', border: '1px solid rgba(255, 193, 7, 0.3)', color: '#fff' }}>
+                        {pathFollowingResult.gradeDetails.notes.map((note, idx) => (
+                          <div key={idx}>{note}</div>
+                        ))}
                       </div>
-                      <div className="breakdown-item">
-                        <span>Bank:</span>
-                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.bank)}>
-                          {pathFollowingResult.gradeDetails.breakdown.bank}
-                        </span>
-                      </div>
-                      <div className="breakdown-item">
-                        <span>Pitch:</span>
-                        <span className={getGradeColorClass(pathFollowingResult.gradeDetails.breakdown.pitch)}>
-                          {pathFollowingResult.gradeDetails.breakdown.pitch}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                    )}
+                  </>
                 )}
-
-                <div className="touchdown-summary">
-                  <h3>Maximum Deviations</h3>
-                  <div className="touchdown-details">
-                    <div className="detail-row">
-                      <span>Altitude:</span>
-                      <span className={pathFollowingResult.busted.altitude ? 'bad' : 'good'}>
-                        {Math.round(pathFollowingResult.maxDeviations.altitude)} ft
-                      </span>
-                    </div>
-                    <div className="detail-row">
-                      <span>Lateral (Path):</span>
-                      <span className={pathFollowingResult.busted.lateral ? 'bad' : 'good'}>
-                        {Math.round(pathFollowingResult.maxDeviations.lateral * 6076)} ft
-                      </span>
-                    </div>
-                    <div className="detail-row">
-                      <span>Speed:</span>
-                      <span className={pathFollowingResult.busted.speed ? 'bad' : 'good'}>
-                        {Math.round(pathFollowingResult.maxDeviations.speed)} kt
-                      </span>
-                    </div>
-                    <div className="detail-row">
-                      <span>Bank Angle:</span>
-                      <span className={pathFollowingResult.busted.bank ? 'bad' : 'good'}>
-                        {Math.round(pathFollowingResult.maxDeviations.bank)}°
-                      </span>
-                    </div>
-                    <div className="detail-row">
-                      <span>Pitch Angle:</span>
-                      <span className={pathFollowingResult.busted.pitch ? 'bad' : 'good'}>
-                        {Math.round(pathFollowingResult.maxDeviations.pitch)}°
-                      </span>
-                    </div>
-                  </div>
-                </div>
 
                 {pathFollowingResult.flightPath && pathFollowingResult.flightPath.length > 0 && (
                   <>

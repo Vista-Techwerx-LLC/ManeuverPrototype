@@ -64,6 +64,15 @@
   position: relative;
 }
 
+.flight-path-control-btn.active {
+  background: var(--primary);
+  color: white;
+}
+
+.flight-path-control-btn.active:hover {
+  background: var(--primary-hover);
+}
+
 .flight-path-control-btn:hover {
   background: var(--blue);
   border-color: var(--blue);

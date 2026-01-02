@@ -556,10 +556,10 @@ export default function SteepTurn({ user }) {
       if (Math.abs(altDev) > Math.abs(newTracking.maxAltDev)) newTracking.maxAltDev = altDev
       if (Math.abs(spdDev) > Math.abs(newTracking.maxSpdDev)) newTracking.maxSpdDev = spdDev
       
-      // Only track max bank deviation after turn is established, after 45° of turn, and during tracking (not during rollout)
+      // Only track max bank deviation after turn is established, after 45° of turn, when bank is at least 40°, and during tracking (not during rollout)
       // Stop tracking bank deviation after 330° to avoid penalizing during rollout when bank decreases
       // During rollout, bank should be decreasing to 0°, so we don't track deviations from 45°
-      if (newTracking.turnEstablished && state === 'tracking' && newTracking.totalTurn >= 45 && newTracking.totalTurn < 330) {
+      if (newTracking.turnEstablished && state === 'tracking' && newTracking.totalTurn >= 45 && newTracking.totalTurn < 330 && bankAbs >= 40) {
         if (Math.abs(bankDev) > Math.abs(newTracking.maxBankDev)) newTracking.maxBankDev = bankDev
       }
 

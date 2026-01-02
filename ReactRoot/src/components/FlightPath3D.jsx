@@ -50,12 +50,17 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
   const [playbackSpeed, setPlaybackSpeed] = useState(1.0)
   const [currentData, setCurrentData] = useState(null)
   const [altitudeDeviation, setAltitudeDeviation] = useState(0)
+  const [cameraFollow, setCameraFollow] = useState(false)
   const animationTimeRef = useRef(0)
   const pointSpheresRef = useRef([])
   const originAltRef = useRef(0)
   const isPlayingRef = useRef(false)
   const playbackSpeedRef = useRef(1.0)
+  const cameraFollowRef = useRef(false)
   const lastPausedIndexRef = useRef(-1)
+  const centerRef = useRef(new THREE.Vector3())
+  const cameraDistanceRef = useRef(0)
+  const maxDimRef = useRef(0)
 
   useEffect(() => {
     isPlayingRef.current = isPlaying
@@ -64,6 +69,10 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
   useEffect(() => {
     playbackSpeedRef.current = playbackSpeed
   }, [playbackSpeed])
+
+  useEffect(() => {
+    cameraFollowRef.current = cameraFollow
+  }, [cameraFollow])
 
   useEffect(() => {
     if (!currentData) {
@@ -1133,6 +1142,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     // Calculate center of flight path for positioning grid and camera
     const box = new THREE.Box3().setFromPoints(pathPoints)
     const center = box.getCenter(new THREE.Vector3())
+    centerRef.current.copy(center)
 
     // Reference plane
     const planeSize = Math.max(
@@ -1236,6 +1246,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     // Position camera
     const size = box.getSize(new THREE.Vector3())
     const maxDim = Math.max(size.x, size.y, size.z)
+    maxDimRef.current = maxDim
     const horizontalDim = Math.max(size.x, size.z)
     const verticalDim = size.y
     
@@ -1247,18 +1258,19 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     // Landing paths (high aspect ratio) get closer camera, steep turns (low aspect ratio) get standard distance
     let distance
     if (aspectRatio > 10) {
-      // Landing approach: use vertical dimension as base, with horizontal consideration
-      distance = Math.max(verticalDim * 8, horizontalDim * 0.8)
+      // Landing approach: use closer camera for better visibility
+      distance = Math.max(verticalDim * 4, horizontalDim * 0.4)
     } else if (aspectRatio > 5) {
       // Mixed path: use weighted average
-      distance = Math.max(verticalDim * 6, horizontalDim * 1.2)
+      distance = Math.max(verticalDim * 5, horizontalDim * 0.8)
     } else {
       // Steep turn or other: use standard calculation
       distance = maxDim * 2.5
     }
 
+    // Position camera with slight side angle for better view
     camera.position.set(
-      center.x + distance * 0.7,
+      center.x + distance * 0.4,
       center.y + distance * 0.5,
       center.z + distance * 0.7
     )
@@ -1272,6 +1284,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     let isDragging = false
     let previousMousePosition = { x: 0, y: 0 }
     let cameraDistance = camera.position.distanceTo(center)
+    cameraDistanceRef.current = cameraDistance
 
     const onMouseDown = (e) => {
       isDragging = true
@@ -1293,6 +1306,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
 
         camera.position.setFromSpherical(spherical).add(center)
         camera.lookAt(center)
+        cameraDistanceRef.current = camera.position.distanceTo(center)
 
         previousMousePosition = { x: e.clientX, y: e.clientY }
       } else {
@@ -1338,9 +1352,12 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
       e.preventDefault()
       const delta = e.deltaY * 0.008
       const direction = camera.position.clone().sub(center).normalize()
-      cameraDistance = Math.max(maxDim * 0.5, Math.min(maxDim * 5, cameraDistance + delta * 50))
+      // Increased sensitivity - each scroll does more zoom
+      cameraDistance = Math.max(maxDim * 0.5, Math.min(maxDim * 20, cameraDistance + delta * 200))
+      cameraDistanceRef.current = cameraDistance
       const newPosition = center.clone().add(direction.multiplyScalar(cameraDistance))
-      camera.position.lerp(newPosition, 0.1)
+      // Use direct position update instead of lerp for faster, more responsive zoom
+      camera.position.copy(newPosition)
       camera.lookAt(center)
     }
 
@@ -1463,29 +1480,41 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
           }
           setCurrentData(interpolatedData)
           
-          // Optimized camera following with smoother interpolation
-          // Use same distance calculation as initial camera position for consistency
-          const followDistance = aspectRatio > 10 
-            ? Math.max(verticalDim * 6, horizontalDim * 0.6)
-            : aspectRatio > 5
-            ? Math.max(verticalDim * 5, horizontalDim * 0.9)
-            : maxDim * 0.8
-          const followHeight = aspectRatio > 10
-            ? Math.max(verticalDim * 2, horizontalDim * 0.2)
-            : aspectRatio > 5
-            ? Math.max(verticalDim * 1.5, horizontalDim * 0.25)
-            : maxDim * 0.3
-          const targetOffset = new THREE.Vector3(
-            Math.sin(heading * Math.PI / 180) * followDistance,
-            followHeight,
-            Math.cos(heading * Math.PI / 180) * followDistance
-          )
-          const targetPosition = position.clone().add(targetOffset)
+          // Camera following - toggleable
+          if (cameraFollowRef.current) {
+            // Optimized camera following with smoother interpolation
+            // Use same distance calculation as initial camera position for consistency
+            const followDistance = aspectRatio > 10 
+              ? Math.max(verticalDim * 3, horizontalDim * 0.3)
+              : aspectRatio > 5
+              ? Math.max(verticalDim * 4, horizontalDim * 0.6)
+              : maxDim * 0.8
+            const followHeight = aspectRatio > 10
+              ? Math.max(verticalDim * 1.5, horizontalDim * 0.15)
+              : aspectRatio > 5
+              ? Math.max(verticalDim * 1.2, horizontalDim * 0.2)
+              : maxDim * 0.3
+            // Position camera to the side of the plane (perpendicular to heading)
+            // Rotate heading by 90 degrees to get perpendicular direction
+            const headingRad = heading * Math.PI / 180
+            const targetOffset = new THREE.Vector3(
+              Math.cos(headingRad) * followDistance,
+              followHeight,
+              -Math.sin(headingRad) * followDistance
+            )
+            const targetPosition = position.clone().add(targetOffset)
 
-          cameraPosition.lerp(targetPosition, 1 - Math.exp(-deltaTime * 3.5))
-          camera.position.copy(cameraPosition)
-          cameraTarget.lerp(position, 1 - Math.exp(-deltaTime * 5))
-          camera.lookAt(cameraTarget)
+            cameraPosition.lerp(targetPosition, 1 - Math.exp(-deltaTime * 3.5))
+            camera.position.copy(cameraPosition)
+            cameraTarget.lerp(position, 1 - Math.exp(-deltaTime * 5))
+            camera.lookAt(cameraTarget)
+            // Update camera distance ref when following aircraft
+            cameraDistanceRef.current = camera.position.distanceTo(centerRef.current)
+          } else {
+            // Camera following disabled - user can manually control camera during playback
+            // Update camera distance ref to maintain current position
+            cameraDistanceRef.current = camera.position.distanceTo(centerRef.current)
+          }
           }
         }
       } else if (!isPlayingRef.current && pathData.length > 0) {
@@ -1772,6 +1801,13 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
             title="Reset"
           >
             ⏮
+          </button>
+          <button 
+            className={`flight-path-control-btn ${cameraFollow ? 'active' : ''}`}
+            onClick={() => setCameraFollow(!cameraFollow)}
+            title={cameraFollow ? 'Disable Camera Follow' : 'Enable Camera Follow'}
+          >
+            <Auto-Pan>Auto-Pan</Auto-Pan>
           </button>
           <div className="flight-path-speed-control">
             <label className="flight-path-speed-label" title="Playback Speed">
