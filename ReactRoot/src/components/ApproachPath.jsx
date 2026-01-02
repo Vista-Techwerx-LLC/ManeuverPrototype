@@ -77,194 +77,151 @@ export default function ApproachPath({
     // Clear canvas
     ctx.clearRect(0, 0, width, height)
     
-    // Set up coordinate system (center = aircraft position)
+    // Top view is **north-up** and the "camera" follows the aircraft (aircraft stays centered).
     // Scale: 1 NM = 80 pixels (base scale, multiplied by zoom)
     const baseScale = 80 // pixels per NM
     const scale = baseScale * topViewZoom
     const centerX = width / 2
-    const centerY = height / 2 // Center of canvas
+    const centerY = height / 2
 
-    // Calculate aircraft position relative to runway
-    let aircraftX = 0
-    let aircraftY = 0
+    // Aircraft is the view origin (camera follow). Pan offsets the camera.
+    const aircraftOriginX = centerX + topViewPan.x
+    const aircraftOriginY = centerY + topViewPan.y
+
+    const thresholdLat = runway.threshold.lat
+    const thresholdLon = runway.threshold.lon
+
+    const bearingToCanvasRad = (bearingDeg) => ((bearingDeg - 90) * Math.PI) / 180
+
+    const offsetFromThreshold = (lat, lon) => {
+      if (lat == null || lon == null) return null
+      const distNm = calculateDistance(thresholdLat, thresholdLon, lat, lon)
+      const bearing = calculateBearing(thresholdLat, thresholdLon, lat, lon)
+      const ang = bearingToCanvasRad(bearing)
+      return {
+        distNm,
+        bearing,
+        dx: Math.cos(ang) * distNm * scale,
+        dy: Math.sin(ang) * distNm * scale
+      }
+    }
+
+    const offsetFromAircraft = (lat, lon) => {
+      if (lat == null || lon == null || dataToUse?.lat == null || dataToUse?.lon == null) return null
+      const distNm = calculateDistance(dataToUse.lat, dataToUse.lon, lat, lon)
+      const bearing = calculateBearing(dataToUse.lat, dataToUse.lon, lat, lon)
+      const ang = bearingToCanvasRad(bearing)
+      return {
+        distNm,
+        bearing,
+        dx: Math.cos(ang) * distNm * scale,
+        dy: Math.sin(ang) * distNm * scale
+      }
+    }
+
+    // Aircraft is centered; runway/paths move relative to it.
+    let aircraftX = aircraftOriginX
+    let aircraftY = aircraftOriginY
     let aircraftDistance = null
     let aircraftLateralDev = null
-    
+
     if (dataToUse && dataToUse.lat && dataToUse.lon) {
-      aircraftDistance = calculateDistance(
-        dataToUse.lat, dataToUse.lon,
-        runway.threshold.lat, runway.threshold.lon
-      )
+      aircraftDistance = calculateDistance(dataToUse.lat, dataToUse.lon, thresholdLat, thresholdLon)
+
+      // Used for the numeric lateral label (still runway-centerline relative)
       aircraftLateralDev = calculateLateralDeviation(
         dataToUse.lat, dataToUse.lon,
         runway.threshold.lat, runway.threshold.lon,
         runway.oppositeEnd.lat, runway.oppositeEnd.lon
       )
-      
-      // Aircraft is at center (0, 0) in this coordinate system
-      aircraftX = 0
-      aircraftY = 0
     }
 
-    // Draw everything relative to aircraft position (with pan offset)
-    ctx.save()
-    ctx.translate(centerX + topViewPan.x, centerY + topViewPan.y)
-    
-    // Calculate runway position relative to aircraft
-    let runwayX = 0
-    let runwayY = 0
-    if (aircraftDistance != null && aircraftLateralDev != null) {
-      runwayX = -aircraftLateralDev * scale // Negative because aircraft is at center
-      runwayY = aircraftDistance * scale // Positive Y is toward threshold
-    }
-    
-    // Draw runway (if within view - within 15 NM of aircraft)
-    if (aircraftDistance != null && aircraftDistance <= 15) {
-      const runwayLengthPx = (runway.length / 6076) * scale // Convert feet to NM to pixels
-      const runwayWidthPx = (runway.width / 6076) * scale
-      
-      // Runway centerline (extended)
-      ctx.strokeStyle = '#666'
-      ctx.setLineDash([5, 5])
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      // If no landing path is selected (or path is invalid), extend to 5NM backward from threshold
-      // Otherwise, extend to 200 pixels forward as before
-      const hasValidPath = selectedLandingPath && selectedLandingPath.length > 3
-      if (hasValidPath) {
-        // With path: extend forward 200 pixels from threshold
-        ctx.moveTo(runwayX, runwayY - runwayLengthPx)
-        ctx.lineTo(runwayX, runwayY + 200)
-      } else {
-        // Without path: extend backward 5NM from threshold (approach direction)
-        ctx.moveTo(runwayX, runwayY - 5 * scale)
-        ctx.lineTo(runwayX, runwayY + 200)
+    // Runway threshold position on screen (relative to aircraft)
+    let runwayX = aircraftOriginX
+    let runwayY = aircraftOriginY
+    if (dataToUse?.lat != null && dataToUse?.lon != null) {
+      const offRunway = offsetFromAircraft(thresholdLat, thresholdLon)
+      if (offRunway) {
+        runwayX = aircraftOriginX + offRunway.dx
+        runwayY = aircraftOriginY + offRunway.dy
       }
+    }
+
+    // Draw everything relative to runway position (runway is fixed)
+    ctx.save()
+
+    // Draw runway oriented to its true heading
+    const runwayLengthPx = (runway.length / 6076) * scale // Convert feet to NM to pixels
+    const runwayWidthPx = (runway.width / 6076) * scale
+
+    // Axis direction from threshold toward the opposite end
+    const runwayAxisBearing = (runway.heading + 180) % 360
+    const runwayAxisRad = bearingToCanvasRad(runwayAxisBearing)
+
+    ctx.save()
+    ctx.translate(runwayX, runwayY)
+    ctx.rotate(runwayAxisRad)
+
+    // Runway centerline (extended both directions)
+    ctx.strokeStyle = '#666'
+    ctx.setLineDash([5, 5])
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    const hasValidPath = selectedLandingPath && selectedLandingPath.length > 3
+    const approachExtensionPx = (hasValidPath ? runwayLengthPx : 5 * scale)
+    ctx.moveTo(-200, 0)
+    ctx.lineTo(approachExtensionPx + 200, 0)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    // Runway surface (from threshold to opposite end)
+    ctx.fillStyle = '#333'
+    ctx.fillRect(0, -runwayWidthPx / 2, runwayLengthPx, runwayWidthPx)
+
+    // Threshold marking (at x=0)
+    ctx.strokeStyle = '#fff'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(0, -runwayWidthPx / 2)
+    ctx.lineTo(0, runwayWidthPx / 2)
+    ctx.stroke()
+
+    // Draw glidepath gates (relative to threshold, along approach side)
+    const gates = ['5.0NM', '4.0NM', '3.0NM', '2.0NM', '1.5NM', '1.0NM', '0.5NM']
+    gates.forEach(gateName => {
+      const gate = GLIDEPATH.gates[gateName]
+      const gateX = gate.distance * scale // NM -> px, along runway axis
+
+      ctx.strokeStyle = '#4a9eff'
+      ctx.lineWidth = 1
+      ctx.setLineDash([3, 3])
+      ctx.beginPath()
+      ctx.moveTo(gateX, -50)
+      ctx.lineTo(gateX, 50)
       ctx.stroke()
       ctx.setLineDash([])
-      
-      // Runway surface
-      ctx.fillStyle = '#333'
-      ctx.fillRect(runwayX - runwayWidthPx / 2, runwayY, runwayWidthPx, runwayLengthPx)
-      
-      // Threshold marking
-      ctx.strokeStyle = '#fff'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      ctx.moveTo(runwayX - runwayWidthPx / 2, runwayY)
-      ctx.lineTo(runwayX + runwayWidthPx / 2, runwayY)
-      ctx.stroke()
-      
-      // Draw glidepath gates (relative to runway threshold)
-      const gates = ['5.0NM', '4.0NM', '3.0NM', '2.0NM', '1.5NM', '1.0NM', '0.5NM']
-      gates.forEach(gateName => {
-        const gate = GLIDEPATH.gates[gateName]
-        const gateY = runwayY - gate.distance * scale // Gate is before threshold
-        
-        // Only draw if gate is within view
-        if (Math.abs(gateY) < height / 2 && Math.abs(runwayX) < width / 2) {
-          ctx.strokeStyle = '#4a9eff'
-          ctx.lineWidth = 1
-          ctx.setLineDash([3, 3])
-          ctx.beginPath()
-          ctx.moveTo(runwayX - 50, gateY)
-          ctx.lineTo(runwayX + 50, gateY)
-          ctx.stroke()
-          ctx.setLineDash([])
-          
-          ctx.fillStyle = '#4a9eff'
-          ctx.font = '10px monospace'
-          ctx.fillText(gateName, runwayX + 55, gateY + 4)
-        }
-      })
-    }
+
+      ctx.fillStyle = '#4a9eff'
+      ctx.font = '10px monospace'
+      ctx.fillText(gateName, gateX + 4, -55)
+    })
+
+    ctx.restore()
     
     // Draw selected landing path (reference path) if provided
-    if (selectedLandingPath && selectedLandingPath.length > 3 && dataToUse) {
-      // Check if aircraft is currently on/near the landing path
-      let isOnPath = false
-      let minDistToPath = Infinity
-      
-      // Check distance to all points on the path
-      selectedLandingPath.forEach((point) => {
-        const distToPoint = calculateDistance(
-          dataToUse.lat, dataToUse.lon,
-          point.lat, point.lon
-        )
-        minDistToPath = Math.min(minDistToPath, distToPoint)
-        // Consider "on path" if within 0.3 NM of any point
-        if (distToPoint <= 0.3) {
-          isOnPath = true
-        }
-      })
-      
-      // Find the start of the landing path (first point)
-      const pathStart = selectedLandingPath[0]
-      
-      // Calculate distance and bearing from aircraft to path start
-      const distToPathStart = calculateDistance(
-        dataToUse.lat, dataToUse.lon,
-        pathStart.lat, pathStart.lon
-      )
-      
-      // Draw blue dotted line to path start (only if not on path and not already close to start)
-      if (!isOnPath && distToPathStart > 0.5 && distToPathStart <= 15) {
-        const bearingToStart = calculateBearing(
-          dataToUse.lat, dataToUse.lon,
-          pathStart.lat, pathStart.lon
-        )
-        
-        // Convert to canvas coordinates (relative to aircraft at center)
-        const angleRad = (bearingToStart - 90) * Math.PI / 180 // -90 to make 0° point up
-        const startX = Math.sin(angleRad) * distToPathStart * scale
-        const startY = -Math.cos(angleRad) * distToPathStart * scale
-        
-        // Draw blue dotted line from aircraft (0, 0) to path start
-        ctx.strokeStyle = '#4a9eff'
-        ctx.lineWidth = 2
-        ctx.setLineDash([8, 4])
-        ctx.globalAlpha = 0.8
-        ctx.beginPath()
-        ctx.moveTo(0, 0) // Aircraft at center
-        ctx.lineTo(startX, startY) // Path start
-        ctx.stroke()
-        ctx.setLineDash([])
-        ctx.globalAlpha = 1.0
-        
-        // Add label at path start
-        ctx.fillStyle = '#4a9eff'
-        ctx.font = '11px monospace'
-        ctx.fillText(`Path Start (${distToPathStart.toFixed(1)} NM)`, startX + 5, startY - 5)
-      }
-      
+    if (selectedLandingPath && selectedLandingPath.length > 3) {
       const referencePoints = []
       
-      // Calculate all points relative to aircraft position
+      // Calculate all points relative to runway threshold (north-up)
       selectedLandingPath.forEach((point) => {
-        // Distance from point to aircraft
-        const distToAircraft = calculateDistance(
-          point.lat, point.lon,
-          dataToUse.lat, dataToUse.lon
-        )
-        
-        // Include points within 15 NM of aircraft or 20 NM of threshold (extended view range)
-        const distToThreshold = calculateDistance(
-          point.lat, point.lon,
-          runway.threshold.lat, runway.threshold.lon
-        )
-        if (distToAircraft <= 15 || distToThreshold <= 20) {
-          // Calculate bearing from aircraft to point
-          const bearing = calculateBearing(
-            dataToUse.lat, dataToUse.lon,
-            point.lat, point.lon
-          )
-          
-          // Convert to canvas coordinates (relative to aircraft at center)
-          const angleRad = (bearing - 90) * Math.PI / 180 // -90 to make 0° point up
-          const x = Math.sin(angleRad) * distToAircraft * scale
-          const y = -Math.cos(angleRad) * distToAircraft * scale
-          
-          referencePoints.push({ x, y, distToAircraft })
+        const off = offsetFromThreshold(point.lat, point.lon)
+        if (!off) return
+        if (off.distNm <= 20) {
+          referencePoints.push({
+            x: runwayX + off.dx,
+            y: runwayY + off.dy,
+            distToThreshold: off.distNm
+          })
         }
       })
       
@@ -418,43 +375,22 @@ export default function ApproachPath({
       }
     }
     
-    // Draw flight path (relative to aircraft position)
-    if (flightPath && flightPath.length > 3 && aircraftData) {
+    // Draw flight path (north-up, plotted relative to aircraft so the camera follows)
+    if (flightPath && flightPath.length > 3) {
       const validPoints = []
       
-      // Calculate all points relative to current aircraft position
-      // For landing approaches, show ALL points in the flight path that are part of the approach
-      // This ensures the complete path is visible, not just what's near the current aircraft position
+      // Calculate all points relative to aircraft
       flightPath.forEach((point) => {
-        // Distance from point to current aircraft (for positioning)
-        const distToAircraft = calculateDistance(
-          point.lat, point.lon,
-          dataToUse.lat, dataToUse.lon
-        )
+        const off = offsetFromAircraft(point.lat, point.lon)
+        if (!off) return
         
-        // Distance from point to runway threshold
-        const distToThreshold = calculateDistance(
-          point.lat, point.lon,
-          runway.threshold.lat, runway.threshold.lon
-        )
-        
-        // Include ALL points that are:
-        // 1. Within 15 NM of aircraft (normal view range), OR
-        // 2. Within 20 NM of runway threshold (full approach range)
-        // This ensures we see the complete approach path from start to threshold and beyond
-        if (distToAircraft <= 15 || distToThreshold <= 20) {
-          // Calculate bearing from aircraft to point for positioning
-          const bearing = calculateBearing(
-            dataToUse.lat, dataToUse.lon,
-            point.lat, point.lon
-          )
-          
-          // Convert to canvas coordinates (relative to aircraft at center)
-          const angleRad = (bearing - 90) * Math.PI / 180 // -90 to make 0° point up
-          const x = Math.sin(angleRad) * distToAircraft * scale
-          const y = -Math.cos(angleRad) * distToAircraft * scale
-          
-          validPoints.push({ x, y })
+        // Include points within 20 NM of runway threshold
+        const distToThreshold = calculateDistance(point.lat, point.lon, thresholdLat, thresholdLon)
+        if (distToThreshold <= 20) {
+          validPoints.push({
+            x: aircraftOriginX + off.dx,
+            y: aircraftOriginY + off.dy
+          })
         }
       })
       
@@ -490,14 +426,14 @@ export default function ApproachPath({
       }
     }
     
-    // Draw aircraft position (always at center when we have position data)
-    if (dataToUse && dataToUse.lat && dataToUse.lon) {
-      // Aircraft symbol (at center, 0, 0)
+    // Draw aircraft position (center of view)
+    if (dataToUse && dataToUse.lat && dataToUse.lon && aircraftDistance != null) {
+      // Aircraft symbol (at calculated position)
       ctx.save()
-      ctx.translate(0, 0) // Aircraft is always at center
+      ctx.translate(aircraftX, aircraftY)
       // Icon is drawn pointing UP (nose at -Y).
       // Rotate to match aircraft heading (0° = North = up)
-      const headingRad = (dataToUse.hdg_true - 90) * Math.PI / 180 // -90 to make 0° point up
+      const headingRad = (dataToUse.hdg_true || 0) * Math.PI / 180
       ctx.rotate(headingRad)
       
       // Draw aircraft icon
@@ -517,18 +453,16 @@ export default function ApproachPath({
       ctx.restore()
       
       // Distance to threshold label
-      if (aircraftDistance != null) {
-        ctx.fillStyle = '#ffff00'
-        ctx.font = '12px monospace'
-        ctx.fillText(`${aircraftDistance.toFixed(1)} NM`, 10, -15)
-        
-        // Lateral deviation label (if significant)
-        if (aircraftLateralDev != null && Math.abs(aircraftLateralDev) > 0.01) {
-          ctx.fillStyle = '#ffaa00'
-          ctx.font = '10px monospace'
-          const devFeet = Math.round(aircraftLateralDev * 6076)
-          ctx.fillText(`${devFeet > 0 ? '+' : ''}${devFeet} ft`, 10, 0)
-        }
+      ctx.fillStyle = '#ffff00'
+      ctx.font = '12px monospace'
+      ctx.fillText(`${aircraftDistance.toFixed(1)} NM`, aircraftX + 10, aircraftY - 15)
+      
+      // Lateral deviation label (if significant)
+      if (aircraftLateralDev != null && Math.abs(aircraftLateralDev) > 0.01) {
+        ctx.fillStyle = '#ffaa00'
+        ctx.font = '10px monospace'
+        const devFeet = Math.round(aircraftLateralDev * 6076)
+        ctx.fillText(`${devFeet > 0 ? '+' : ''}${devFeet} ft`, aircraftX + 10, aircraftY)
       }
     }
     

@@ -112,7 +112,8 @@ async function saveLandingToDatabase(userId, landingData) {
         user_id: userId,
         maneuver_type: 'landing',
         grade: landingData.grade,
-        result_data: landingData.details
+        result_data: landingData.details,
+        skill_level: landingData.details.skillLevel
       })
     
     if (error) {
@@ -1957,6 +1958,7 @@ export default function Landing({ user }) {
               <div className="card">
                 <h2>Approach Path</h2>
                 <ApproachPath
+                  key={selectedRunway}
                   runway={runway}
                   aircraftData={data}
                   flightPath={flightPath}
@@ -2014,42 +2016,6 @@ export default function Landing({ user }) {
                   </div>
                 )}
 
-                {landingResult.maxDeviations && (
-                  <div className="touchdown-summary">
-                    <h3>Maximum Deviations</h3>
-                    <div className="touchdown-details">
-                      <div className="detail-row">
-                        <span>Altitude (from glidepath):</span>
-                        <span className={landingResult.busted?.altitude ? 'bad' : 'good'}>
-                          {Math.round(landingResult.maxDeviations.altitude)} ft
-                          {landingResult.busted?.altitude ? ' ⚠ BUSTED' : ' ✓'}
-                        </span>
-                      </div>
-                      <div className="detail-row">
-                        <span>Speed (from Vref+5):</span>
-                        <span className={landingResult.busted?.speed ? 'bad' : 'good'}>
-                          {Math.round(landingResult.maxDeviations.speed)} kt
-                          {landingResult.busted?.speed ? ' ⚠ BUSTED' : ' ✓'}
-                        </span>
-                      </div>
-                      <div className="detail-row">
-                        <span>Bank Angle:</span>
-                        <span className={landingResult.busted?.bank ? 'bad' : 'good'}>
-                          {Math.round(landingResult.maxDeviations.bank)}°
-                          {landingResult.busted?.bank ? ' ⚠ BUSTED' : ' ✓'}
-                        </span>
-                      </div>
-                      <div className="detail-row">
-                        <span>Pitch Angle:</span>
-                        <span className={landingResult.busted?.pitch ? 'bad' : 'good'}>
-                          {Math.round(landingResult.maxDeviations.pitch)}°
-                          {landingResult.busted?.pitch ? ' ⚠ BUSTED' : ' ✓'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
                 {touchdownData.current && (
                   <div className="touchdown-summary">
                     <h3>Touchdown</h3>
@@ -2094,6 +2060,38 @@ export default function Landing({ user }) {
                       />
                     </div>
                   </>
+                )}
+
+                {landingResult.maxDeviations && (
+                  <div className="touchdown-summary">
+                    <h3>Maximum Deviations</h3>
+                    <div className="touchdown-details">
+                      <div className="detail-row">
+                        <span>Altitude (from glidepath):</span>
+                        <span className={landingResult.busted?.altitude ? 'bad' : 'good'}>
+                          {Math.round(landingResult.maxDeviations.altitude)} ft
+                        </span>
+                      </div>
+                      <div className="detail-row">
+                        <span>Speed (from Vref+5):</span>
+                        <span className={landingResult.busted?.speed ? 'bad' : 'good'}>
+                          {Math.round(landingResult.maxDeviations.speed)} kt
+                        </span>
+                      </div>
+                      <div className="detail-row">
+                        <span>Bank Angle:</span>
+                        <span className={landingResult.busted?.bank ? 'bad' : 'good'}>
+                          {Math.round(landingResult.maxDeviations.bank)}°
+                        </span>
+                      </div>
+                      <div className="detail-row">
+                        <span>Pitch Angle:</span>
+                        <span className={landingResult.busted?.pitch ? 'bad' : 'good'}>
+                          {Math.round(landingResult.maxDeviations.pitch)}°
+                        </span>
+                      </div>
+                    </div>
+                  </div>
                 )}
 
                 <button className="big-button reset" onClick={reset}>
@@ -2160,35 +2158,30 @@ export default function Landing({ user }) {
                       <span>Altitude:</span>
                       <span className={pathFollowingResult.busted.altitude ? 'bad' : 'good'}>
                         {Math.round(pathFollowingResult.maxDeviations.altitude)} ft
-                        {pathFollowingResult.busted.altitude ? ' ⚠ BUSTED' : ' ✓'}
                       </span>
                     </div>
                     <div className="detail-row">
                       <span>Lateral (Path):</span>
                       <span className={pathFollowingResult.busted.lateral ? 'bad' : 'good'}>
                         {Math.round(pathFollowingResult.maxDeviations.lateral * 6076)} ft
-                        {pathFollowingResult.busted.lateral ? ' ⚠ BUSTED' : ' ✓'}
                       </span>
                     </div>
                     <div className="detail-row">
                       <span>Speed:</span>
                       <span className={pathFollowingResult.busted.speed ? 'bad' : 'good'}>
                         {Math.round(pathFollowingResult.maxDeviations.speed)} kt
-                        {pathFollowingResult.busted.speed ? ' ⚠ BUSTED' : ' ✓'}
                       </span>
                     </div>
                     <div className="detail-row">
                       <span>Bank Angle:</span>
                       <span className={pathFollowingResult.busted.bank ? 'bad' : 'good'}>
                         {Math.round(pathFollowingResult.maxDeviations.bank)}°
-                        {pathFollowingResult.busted.bank ? ' ⚠ BUSTED' : ' ✓'}
                       </span>
                     </div>
                     <div className="detail-row">
                       <span>Pitch Angle:</span>
                       <span className={pathFollowingResult.busted.pitch ? 'bad' : 'good'}>
                         {Math.round(pathFollowingResult.maxDeviations.pitch)}°
-                        {pathFollowingResult.busted.pitch ? ' ⚠ BUSTED' : ' ✓'}
                       </span>
                     </div>
                   </div>

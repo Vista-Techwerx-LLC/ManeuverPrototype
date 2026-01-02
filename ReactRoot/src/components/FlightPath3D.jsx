@@ -1809,6 +1809,12 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
                 </span>
               </div>
               <div className="live-data-item">
+                <span className="live-data-label">Speed:</span>
+                <span className="live-data-value">
+                  {Math.round(currentData.airspeed || 0)} kt
+                </span>
+              </div>
+              <div className="live-data-item">
                 <span className="live-data-label">Bank:</span>
                 <span className={`live-data-value ${bankGuideClass}`}>
                   {Math.round(currentData.bank)}°

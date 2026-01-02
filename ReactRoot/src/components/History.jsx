@@ -808,7 +808,7 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                 </div>
               )}
 
-              {maneuver.maneuver_type === 'path_following' && details.maxDeviations && (
+              {(maneuver.maneuver_type === 'landing' || maneuver.maneuver_type === 'path_following') && details.maxDeviations && (
                 <div className="details-section">
                   <h3>Maximum Deviations</h3>
                   <div className="deviation-grid">
@@ -816,19 +816,23 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                       <div className={details.gradeDetails?.breakdown?.altitude 
                         ? getGradeColorClass(details.gradeDetails.breakdown.altitude)
                         : getAltitudeDeviationClass(details.maxDeviations.altitude)}>
-                        <span className="label">Altitude:</span>
+                        <span className="label">
+                          {maneuver.maneuver_type === 'landing' ? 'Altitude (from glidepath):' : 'Altitude:'}
+                        </span>
                         <span className="value">
-                          {(details.maxDeviations.altitude >= 0 ? '+' : '') + Math.round(details.maxDeviations.altitude)} ft
+                          {maneuver.maneuver_type === 'landing' 
+                            ? Math.round(details.maxDeviations.altitude) + ' ft'
+                            : (details.maxDeviations.altitude >= 0 ? '+' : '') + Math.round(details.maxDeviations.altitude) + ' ft'}
                         </span>
                       </div>
                     )}
-                    {details.maxDeviations.lateral !== undefined && (
+                    {details.maxDeviations.lateral !== undefined && maneuver.maneuver_type === 'path_following' && (
                       <div className={details.gradeDetails?.breakdown?.lateral
                         ? getGradeColorClass(details.gradeDetails.breakdown.lateral)
                         : (Math.abs(details.maxDeviations.lateral) <= 50 ? 'pass' : 'fail')}>
-                        <span className="label">Lateral:</span>
+                        <span className="label">Lateral (Path):</span>
                         <span className="value">
-                          {(details.maxDeviations.lateral >= 0 ? '+' : '') + Math.round(details.maxDeviations.lateral)} ft
+                          {Math.round(details.maxDeviations.lateral * 6076)} ft
                         </span>
                       </div>
                     )}
@@ -836,9 +840,13 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                       <div className={details.gradeDetails?.breakdown?.speed
                         ? getGradeColorClass(details.gradeDetails.breakdown.speed)
                         : (Math.abs(details.maxDeviations.speed) <= 10 ? 'pass' : 'fail')}>
-                        <span className="label">Speed:</span>
+                        <span className="label">
+                          {maneuver.maneuver_type === 'landing' ? 'Speed (from Vref+5):' : 'Speed:'}
+                        </span>
                         <span className="value">
-                          {(details.maxDeviations.speed >= 0 ? '+' : '') + Math.round(details.maxDeviations.speed)} kt
+                          {maneuver.maneuver_type === 'landing'
+                            ? Math.round(details.maxDeviations.speed) + ' kt'
+                            : (details.maxDeviations.speed >= 0 ? '+' : '') + Math.round(details.maxDeviations.speed) + ' kt'}
                         </span>
                       </div>
                     )}
@@ -846,9 +854,11 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                       <div className={details.gradeDetails?.breakdown?.bank
                         ? getGradeColorClass(details.gradeDetails.breakdown.bank)
                         : (Math.abs(details.maxDeviations.bank) <= 5 ? 'pass' : 'fail')}>
-                        <span className="label">Bank:</span>
+                        <span className="label">Bank Angle:</span>
                         <span className="value">
-                          {(details.maxDeviations.bank >= 0 ? '+' : '') + Math.round(details.maxDeviations.bank)}°
+                          {maneuver.maneuver_type === 'landing'
+                            ? Math.round(details.maxDeviations.bank) + '°'
+                            : (details.maxDeviations.bank >= 0 ? '+' : '') + Math.round(details.maxDeviations.bank) + '°'}
                         </span>
                       </div>
                     )}
@@ -856,9 +866,11 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                       <div className={details.gradeDetails?.breakdown?.pitch
                         ? getGradeColorClass(details.gradeDetails.breakdown.pitch)
                         : (Math.abs(details.maxDeviations.pitch) <= 3 ? 'pass' : 'fail')}>
-                        <span className="label">Pitch:</span>
+                        <span className="label">Pitch Angle:</span>
                         <span className="value">
-                          {(details.maxDeviations.pitch >= 0 ? '+' : '') + Math.round(details.maxDeviations.pitch)}°
+                          {maneuver.maneuver_type === 'landing'
+                            ? Math.round(details.maxDeviations.pitch) + '°'
+                            : (details.maxDeviations.pitch >= 0 ? '+' : '') + Math.round(details.maxDeviations.pitch) + '°'}
                         </span>
                       </div>
                     )}
