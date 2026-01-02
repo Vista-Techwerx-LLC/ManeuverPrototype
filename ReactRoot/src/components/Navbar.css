@@ -2,7 +2,11 @@
   background: var(--card);
   border-bottom: 1px solid var(--border);
   padding: 0;
-  overflow-x: hidden;
+  position: sticky;
+  top: 0;
+  width: 100%;
+  z-index: 10000;
+  overflow: visible;
 }
 
 .navbar-container {
@@ -14,7 +18,9 @@
   justify-content: space-between;
   gap: var(--gap-xl);
   flex-wrap: nowrap;
-  overflow-x: hidden;
+  overflow: visible;
+  position: relative;
+  width: 100%;
 }
 
 .navbar-brand {
@@ -66,6 +72,7 @@
   align-items: center;
   flex-shrink: 0;
   min-width: 0;
+  z-index: 10001;
 }
 
 .user-menu-btn {
@@ -119,8 +126,9 @@
   border-radius: var(--border-radius-md);
   min-width: 180px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
-  overflow: hidden;
+  z-index: 10002;
+  overflow: visible;
+  margin-top: 4px;
 }
 
 .dropdown-item {
@@ -189,14 +197,29 @@
     justify-content: center;
     gap: var(--spacing-xs);
     overflow-x: auto;
+    overflow-y: visible;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
     padding-bottom: 2px;
     margin-top: var(--spacing-xs);
   }
   
   .navbar-links::-webkit-scrollbar {
-    display: none;
+    height: 4px;
+  }
+  
+  .navbar-links::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  .navbar-links::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 2px;
+  }
+  
+  .navbar-links::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
   }
   
   .navbar-links a {
