@@ -11,9 +11,9 @@ export const PHASE_WEIGHTS = {
 }
 
 export const METRIC_WEIGHTS = {
-  lateral: 0.35,
+  speed: 0.35,
   altitude: 0.30,
-  speed: 0.20,
+  lateral: 0.20,
   bank: 0.10,
   pitch: 0.05
 }

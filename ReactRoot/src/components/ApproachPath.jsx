@@ -93,11 +93,16 @@ export default function ApproachPath({
 
     const bearingToCanvasRad = (bearingDeg) => ((bearingDeg - 90) * Math.PI) / 180
 
-    // Rotate the entire top-view so the approach comes from top -> bottom.
-    // If runway.heading is the landing direction toward the threshold, then the approach side (threshold -> aircraft on final)
-    // is roughly (runway.heading + 180). We rotate so that direction points "up" on screen.
-    const approachSideBearing = (runway.heading + 180) % 360
-    const viewRotationRad = (-approachSideBearing * Math.PI) / 180
+    // Calculate the ACTUAL bearing from threshold to opposite end
+    const actualRunwayBearing = calculateBearing(thresholdLat, thresholdLon, runway.oppositeEnd.lat, runway.oppositeEnd.lon)
+    
+    // North-up view - no rotation
+    // This shows the actual geographic orientation:
+    // - Landing west (270°) → approach comes from right to left
+    // - Landing east (90°) → approach comes from left to right
+    // - Landing north (0°) → approach comes from bottom to top
+    // - Landing south (180°) → approach comes from top to bottom
+    const viewRotationRad = 0
 
     const bearingToScreenRad = (bearingDeg) => bearingToCanvasRad(bearingDeg) + viewRotationRad
 
@@ -144,77 +149,115 @@ export default function ApproachPath({
       )
     }
 
-    // Runway threshold position on screen (relative to aircraft)
-    let runwayX = aircraftOriginX
-    let runwayY = aircraftOriginY
+    // Calculate both threshold and opposite end positions on screen
+    // This ensures the runway centerline is always correctly aligned regardless of distance
+    let thresholdX = aircraftOriginX
+    let thresholdY = aircraftOriginY
+    let oppositeX = aircraftOriginX
+    let oppositeY = aircraftOriginY
+    
     if (dataToUse?.lat != null && dataToUse?.lon != null) {
-      const offRunway = offsetFromAircraft(thresholdLat, thresholdLon)
-      if (offRunway) {
-        runwayX = aircraftOriginX + offRunway.dx
-        runwayY = aircraftOriginY + offRunway.dy
+      const offThreshold = offsetFromAircraft(thresholdLat, thresholdLon)
+      if (offThreshold) {
+        thresholdX = aircraftOriginX + offThreshold.dx
+        thresholdY = aircraftOriginY + offThreshold.dy
+      }
+      
+      const offOpposite = offsetFromAircraft(runway.oppositeEnd.lat, runway.oppositeEnd.lon)
+      if (offOpposite) {
+        oppositeX = aircraftOriginX + offOpposite.dx
+        oppositeY = aircraftOriginY + offOpposite.dy
       }
     }
 
-    // Draw everything relative to runway position (runway is fixed)
-    ctx.save()
-
-    // Draw runway oriented to its true heading
-    const runwayLengthPx = (runway.length / 6076) * scale // Convert feet to NM to pixels
+    // Use the actual runway bearing (threshold to opposite end) for drawing
+    // The view is rotated so the runway will be vertical
+    const runwayBearing = actualRunwayBearing
+    const runwayScreenAngle = bearingToScreenRad(runwayBearing)
+    
+    // Direction unit vector for the runway (from threshold toward opposite end)
+    const dirX = Math.cos(runwayScreenAngle)
+    const dirY = Math.sin(runwayScreenAngle)
+    
+    // Perpendicular vector for runway width
+    const perpX = -dirY
+    const perpY = dirX
+    
+    // Runway length from distance calculation (more accurate than screen positions)
+    const runwayLengthNm = calculateDistance(thresholdLat, thresholdLon, runway.oppositeEnd.lat, runway.oppositeEnd.lon)
+    const runwayLengthPx = runwayLengthNm * scale
     const runwayWidthPx = (runway.width / 6076) * scale
-
-    // Axis direction from threshold toward the opposite end
-    const runwayAxisBearing = (runway.heading + 180) % 360
-    const runwayAxisRad = bearingToCanvasRad(runwayAxisBearing) + viewRotationRad
-
-    ctx.save()
-    ctx.translate(runwayX, runwayY)
-    ctx.rotate(runwayAxisRad)
-
+    const halfWidth = runwayWidthPx / 2
+    
+    // Calculate opposite end position from threshold using the correct direction
+    const calcOppositeX = thresholdX + dirX * runwayLengthPx
+    const calcOppositeY = thresholdY + dirY * runwayLengthPx
+    
     // Runway centerline (extended both directions)
+    const extendBack = 200
+    const extendForward = 200
+    
+    const backX = thresholdX - dirX * extendBack
+    const backY = thresholdY - dirY * extendBack
+    const forwardX = calcOppositeX + dirX * extendForward
+    const forwardY = calcOppositeY + dirY * extendForward
+    
     ctx.strokeStyle = '#666'
     ctx.setLineDash([5, 5])
     ctx.lineWidth = 1
     ctx.beginPath()
-    const hasValidPath = selectedLandingPath && selectedLandingPath.length > 3
-    const approachExtensionPx = (hasValidPath ? runwayLengthPx : 5 * scale)
-    ctx.moveTo(-200, 0)
-    ctx.lineTo(approachExtensionPx + 200, 0)
+    ctx.moveTo(backX, backY)
+    ctx.lineTo(forwardX, forwardY)
     ctx.stroke()
     ctx.setLineDash([])
 
     // Runway surface (from threshold to opposite end)
     ctx.fillStyle = '#333'
-    ctx.fillRect(0, -runwayWidthPx / 2, runwayLengthPx, runwayWidthPx)
+    ctx.beginPath()
+    ctx.moveTo(thresholdX + perpX * halfWidth, thresholdY + perpY * halfWidth)
+    ctx.lineTo(thresholdX - perpX * halfWidth, thresholdY - perpY * halfWidth)
+    ctx.lineTo(calcOppositeX - perpX * halfWidth, calcOppositeY - perpY * halfWidth)
+    ctx.lineTo(calcOppositeX + perpX * halfWidth, calcOppositeY + perpY * halfWidth)
+    ctx.closePath()
+    ctx.fill()
 
-    // Threshold marking (at x=0)
+    // Threshold marking (perpendicular line at threshold)
     ctx.strokeStyle = '#fff'
     ctx.lineWidth = 2
     ctx.beginPath()
-    ctx.moveTo(0, -runwayWidthPx / 2)
-    ctx.lineTo(0, runwayWidthPx / 2)
+    ctx.moveTo(thresholdX + perpX * halfWidth, thresholdY + perpY * halfWidth)
+    ctx.lineTo(thresholdX - perpX * halfWidth, thresholdY - perpY * halfWidth)
     ctx.stroke()
 
     // Draw glidepath gates (relative to threshold, along approach side)
+    // Gates extend in the opposite direction from runway (toward the aircraft on approach)
     const gates = ['5.0NM', '4.0NM', '3.0NM', '2.0NM', '1.5NM', '1.0NM', '0.5NM']
     gates.forEach(gateName => {
       const gate = GLIDEPATH.gates[gateName]
-      const gateX = gate.distance * scale // NM -> px, along runway axis
-
+      const gateDistancePx = gate.distance * scale
+      
+      // Gate position is along the approach path (opposite direction from runway)
+      const gateX = thresholdX - dirX * gateDistancePx
+      const gateY = thresholdY - dirY * gateDistancePx
+      
+      // Gate line is perpendicular to runway
+      const gateLineLength = 100
       ctx.strokeStyle = '#4a9eff'
       ctx.lineWidth = 1
       ctx.setLineDash([3, 3])
       ctx.beginPath()
-      ctx.moveTo(gateX, -50)
-      ctx.lineTo(gateX, 50)
+      ctx.moveTo(gateX + perpX * gateLineLength / 2, gateY + perpY * gateLineLength / 2)
+      ctx.lineTo(gateX - perpX * gateLineLength / 2, gateY - perpY * gateLineLength / 2)
       ctx.stroke()
       ctx.setLineDash([])
 
       ctx.fillStyle = '#4a9eff'
       ctx.font = '10px monospace'
-      ctx.fillText(gateName, gateX + 4, -55)
+      ctx.textAlign = 'left'
+      ctx.fillText(gateName, gateX + perpX * (gateLineLength / 2 + 4), gateY + perpY * (gateLineLength / 2 + 4))
     })
-
-    ctx.restore()
+    
+    ctx.textAlign = 'left'
     
     // Draw selected landing path (reference path) if provided
     if (selectedLandingPath && selectedLandingPath.length > 3) {

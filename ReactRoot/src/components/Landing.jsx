@@ -1102,6 +1102,7 @@ export default function Landing({ user }) {
         busted,
         skillLevel: pathFollowingSkillLevel,
         touchdown: touchdownData.current,
+        gatesPassed,
         flightPath,
         runway: {
           id: selectedRunway,
