@@ -51,6 +51,8 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
   const [currentData, setCurrentData] = useState(null)
   const [altitudeDeviation, setAltitudeDeviation] = useState(0)
   const [cameraFollow, setCameraFollow] = useState(false)
+  const [viewMode, setViewMode] = useState('3d')
+  const viewModeRef = useRef('3d')
   const animationTimeRef = useRef(0)
   const pointSpheresRef = useRef([])
   const originAltRef = useRef(0)
@@ -73,6 +75,10 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
   useEffect(() => {
     cameraFollowRef.current = cameraFollow
   }, [cameraFollow])
+
+  useEffect(() => {
+    viewModeRef.current = viewMode
+  }, [viewMode])
 
   useEffect(() => {
     if (!currentData) {
@@ -1148,17 +1154,129 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
     const planeSize = Math.max(
       Math.abs(pathPoints[pathPoints.length - 1].x - pathPoints[0].x),
       Math.abs(pathPoints[pathPoints.length - 1].z - pathPoints[0].z)
-    ) * 1.5
+    ) * 3
 
     const planeGeometry = new THREE.PlaneGeometry(planeSize, planeSize, 20, 20)
+    
+    const loadMapTexture = () => {
+      // Calculate the actual lat/lon of the ground plane center
+      // The ground plane is positioned at (center.x, center.z) in local coordinates
+      // Convert back to lat/lon
+      const mapCenterLat = originLat + ((-center.z) / latToMeters)
+      const mapCenterLon = originLon + (center.x / lonToMeters)
+      
+      // Calculate the geographic bounds of the ground plane
+      const halfSizeMeters = planeSize / 2
+      const minLat = mapCenterLat - (halfSizeMeters / latToMeters)
+      const maxLat = mapCenterLat + (halfSizeMeters / latToMeters)
+      const minLon = mapCenterLon - (halfSizeMeters / lonToMeters)
+      const maxLon = mapCenterLon + (halfSizeMeters / lonToMeters)
+      
+      const tileSize = 256
+      const zoom = 15
+      
+      const latToTileY = (lat, z) => {
+        return (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * Math.pow(2, z)
+      }
+      
+      const lonToTileX = (lon, z) => {
+        return (lon + 180) / 360 * Math.pow(2, z)
+      }
+      
+      const tileYToLat = (y, z) => {
+        const n = Math.PI - 2 * Math.PI * y / Math.pow(2, z)
+        return 180 / Math.PI * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)))
+      }
+      
+      const tileXToLon = (x, z) => {
+        return x / Math.pow(2, z) * 360 - 180
+      }
+      
+      // Get tile coordinates for bounds
+      const minTileX = Math.floor(lonToTileX(minLon, zoom))
+      const maxTileX = Math.floor(lonToTileX(maxLon, zoom))
+      const minTileY = Math.floor(latToTileY(maxLat, zoom)) // Note: Y is inverted
+      const maxTileY = Math.floor(latToTileY(minLat, zoom))
+      
+      const tilesX = maxTileX - minTileX + 1
+      const tilesY = maxTileY - minTileY + 1
+      
+      const canvas = document.createElement('canvas')
+      canvas.width = tileSize * tilesX
+      canvas.height = tileSize * tilesY
+      const ctx = canvas.getContext('2d')
+      
+      // Calculate the geographic bounds of the tile grid
+      const tileGridMinLon = tileXToLon(minTileX, zoom)
+      const tileGridMaxLon = tileXToLon(maxTileX + 1, zoom)
+      const tileGridMaxLat = tileYToLat(minTileY, zoom)
+      const tileGridMinLat = tileYToLat(maxTileY + 1, zoom)
+      
+      let loadedTiles = 0
+      const totalTilesToLoad = tilesX * tilesY
+      
+      for (let x = 0; x < tilesX; x++) {
+        for (let y = 0; y < tilesY; y++) {
+          const currentTileX = minTileX + x
+          const currentTileY = minTileY + y
+          
+          const img = new Image()
+          img.crossOrigin = 'anonymous'
+          
+          img.onload = () => {
+            const drawX = x * tileSize
+            const drawY = y * tileSize
+            ctx.drawImage(img, drawX, drawY, tileSize, tileSize)
+            loadedTiles++
+            
+            if (loadedTiles === totalTilesToLoad) {
+              const texture = new THREE.CanvasTexture(canvas)
+              texture.wrapS = THREE.ClampToEdgeWrapping
+              texture.wrapT = THREE.ClampToEdgeWrapping
+              
+              // Calculate UV offset and scale to crop texture to ground plane bounds
+              const uMin = (minLon - tileGridMinLon) / (tileGridMaxLon - tileGridMinLon)
+              const uMax = (maxLon - tileGridMinLon) / (tileGridMaxLon - tileGridMinLon)
+              const vMin = (tileGridMaxLat - maxLat) / (tileGridMaxLat - tileGridMinLat)
+              const vMax = (tileGridMaxLat - minLat) / (tileGridMaxLat - tileGridMinLat)
+              
+              texture.offset.set(uMin, 1 - vMax)
+              texture.repeat.set(uMax - uMin, vMax - vMin)
+              
+              planeMaterial.map = texture
+              planeMaterial.needsUpdate = true
+            }
+          }
+          
+          img.onerror = () => {
+            loadedTiles++
+            if (loadedTiles === totalTilesToLoad) {
+              const texture = new THREE.CanvasTexture(canvas)
+              texture.wrapS = THREE.ClampToEdgeWrapping
+              texture.wrapT = THREE.ClampToEdgeWrapping
+              planeMaterial.map = texture
+              planeMaterial.needsUpdate = true
+            }
+          }
+          
+          const tileUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${zoom}/${currentTileY}/${currentTileX}`
+          img.src = tileUrl
+        }
+      }
+      
+      return null
+    }
+    
     const planeMaterial = new THREE.MeshStandardMaterial({
-      color: 0x444455,
+      color: 0x888888,
       side: THREE.DoubleSide,
-      metalness: 0.1,
-      roughness: 0.8,
-      transparent: true,
-      opacity: 0.4
+      metalness: 0.0,
+      roughness: 1.0,
+      transparent: false,
+      opacity: 1.0
     })
+    
+    loadMapTexture()
     const referencePlane = new THREE.Mesh(planeGeometry, planeMaterial)
     referencePlane.rotation.x = -Math.PI / 2
     referencePlane.position.set(center.x, 0, center.z)
@@ -1268,13 +1386,33 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
       distance = maxDim * 2.5
     }
 
-    // Position camera with slight side angle for better view
-    camera.position.set(
-      center.x + distance * 0.4,
-      center.y + distance * 0.5,
-      center.z + distance * 0.7
-    )
-    camera.lookAt(center)
+    let mapLookAtPoint = center.clone()
+    let cameraDistance = camera.position.distanceTo(center)
+    cameraDistanceRef.current = cameraDistance
+    
+    const updateCameraPosition = () => {
+      if (viewModeRef.current === 'map') {
+        const mapHeight = Math.max(horizontalDim * 0.8, verticalDim * 3)
+        mapLookAtPoint = center.clone()
+        camera.position.set(center.x, center.y + mapHeight, center.z)
+        camera.lookAt(mapLookAtPoint)
+        camera.up.set(0, 0, -1)
+        cameraDistance = mapHeight
+        cameraDistanceRef.current = cameraDistance
+      } else {
+        camera.position.set(
+          center.x + distance * 0.4,
+          center.y + distance * 0.5,
+          center.z + distance * 0.7
+        )
+        camera.lookAt(center)
+        camera.up.set(0, 1, 0)
+        cameraDistance = camera.position.distanceTo(center)
+        cameraDistanceRef.current = cameraDistance
+      }
+    }
+    
+    updateCameraPosition()
 
     // Raycaster for clicking
     const raycaster = new THREE.Raycaster()
@@ -1282,12 +1420,12 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
 
     // Controls
     let isDragging = false
+    let isRotating = false
     let previousMousePosition = { x: 0, y: 0 }
-    let cameraDistance = camera.position.distanceTo(center)
-    cameraDistanceRef.current = cameraDistance
 
     const onMouseDown = (e) => {
       isDragging = true
+      isRotating = e.ctrlKey || e.metaKey
       previousMousePosition = { x: e.clientX, y: e.clientY }
     }
 
@@ -1296,17 +1434,52 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
         const deltaX = e.clientX - previousMousePosition.x
         const deltaY = e.clientY - previousMousePosition.y
 
-        const spherical = new THREE.Spherical()
-        spherical.setFromVector3(camera.position.clone().sub(center))
-        
-        spherical.theta -= deltaX * 0.008
-        spherical.phi += deltaY * 0.008
-        spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi))
-        spherical.radius = cameraDistance
-
-        camera.position.setFromSpherical(spherical).add(center)
-        camera.lookAt(center)
-        cameraDistanceRef.current = camera.position.distanceTo(center)
+        if (isRotating || (e.ctrlKey || e.metaKey)) {
+          // Rotation mode - rotate camera around the look-at point
+          // Horizontal drag: rotate around Y axis (orbit left/right)
+          // Vertical drag: rotate up/down (change elevation angle)
+          
+          const rotateSpeed = 0.005
+          
+          // Get vector from look-at point to camera
+          const offset = camera.position.clone().sub(mapLookAtPoint)
+          const distance = offset.length()
+          
+          // Convert to spherical coordinates
+          const spherical = new THREE.Spherical()
+          spherical.setFromVector3(offset)
+          
+          // Apply rotation
+          spherical.theta -= deltaX * rotateSpeed
+          spherical.phi -= deltaY * rotateSpeed
+          
+          // Clamp phi to prevent flipping
+          spherical.phi = Math.max(0.1, Math.min(Math.PI * 0.45, spherical.phi))
+          
+          // Keep same distance
+          spherical.radius = distance
+          
+          // Convert back to Cartesian and update camera
+          offset.setFromSpherical(spherical)
+          camera.position.copy(mapLookAtPoint).add(offset)
+          camera.lookAt(mapLookAtPoint)
+          
+          cameraDistance = distance
+          cameraDistanceRef.current = distance
+        } else {
+          // Pan mode - drag to move the view (opposite of camera movement)
+          const panSpeed = cameraDistance * 0.002
+          
+          const panX = deltaX * panSpeed
+          const panZ = deltaY * panSpeed
+          
+          mapLookAtPoint.x += panX
+          mapLookAtPoint.z += panZ
+          
+          camera.position.x += panX
+          camera.position.z += panZ
+          camera.lookAt(mapLookAtPoint)
+        }
 
         previousMousePosition = { x: e.clientX, y: e.clientY }
       } else {
@@ -1350,15 +1523,32 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
 
     const onWheel = (e) => {
       e.preventDefault()
-      const delta = e.deltaY * 0.008
-      const direction = camera.position.clone().sub(center).normalize()
-      // Increased sensitivity - each scroll does more zoom
-      cameraDistance = Math.max(maxDim * 0.5, Math.min(maxDim * 20, cameraDistance + delta * 200))
+      const delta = -e.deltaY * 0.008  // Negate to reverse direction: scroll down = zoom out
+      
+      const zoomFactor = 1 + delta * 0.15
+      const forward = new THREE.Vector3()
+      camera.getWorldDirection(forward)
+      
+      // Calculate zoom amount based on current distance
+      const zoomAmount = cameraDistance * (zoomFactor - 1)
+      
+      // Store current camera direction before moving
+      const currentRotation = camera.quaternion.clone()
+      
+      // Move camera along its view direction
+      camera.position.add(forward.clone().multiplyScalar(zoomAmount))
+      
+      // Move mapLookAtPoint to maintain the same relative position
+      mapLookAtPoint.add(forward.clone().multiplyScalar(zoomAmount))
+      
+      // Update cameraDistance
+      const minDist = maxDim * 0.1
+      const maxDistLimit = maxDim * 20
+      cameraDistance = Math.max(minDist, Math.min(maxDistLimit, cameraDistance * zoomFactor))
       cameraDistanceRef.current = cameraDistance
-      const newPosition = center.clone().add(direction.multiplyScalar(cameraDistance))
-      // Use direct position update instead of lerp for faster, more responsive zoom
-      camera.position.copy(newPosition)
-      camera.lookAt(center)
+      
+      // Restore the camera rotation to prevent any direction change
+      camera.quaternion.copy(currentRotation)
     }
 
     container.addEventListener('mousedown', onMouseDown)
@@ -1807,7 +1997,7 @@ export default function FlightPath3D({ flightPath, entry, referencePath, runway,
             onClick={() => setCameraFollow(!cameraFollow)}
             title={cameraFollow ? 'Disable Camera Follow' : 'Enable Camera Follow'}
           >
-            <Auto-Pan>Auto-Pan</Auto-Pan>
+            Auto-Pan
           </button>
           <div className="flight-path-speed-control">
             <label className="flight-path-speed-label" title="Playback Speed">

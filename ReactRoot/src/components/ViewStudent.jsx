@@ -129,6 +129,54 @@ function getRunwayDisplayName(runwayData, customRunways = []) {
   return runwayData?.id || 'Unknown'
 }
 
+function getGradeColors(grade) {
+  const gradeClass = getGradeColorClass(grade)
+  if (gradeClass === 'grade-green') {
+    return {
+      border: '#00ff88',
+      bg: 'rgba(0, 255, 136, 0.15)',
+      bgHover: 'rgba(0, 255, 136, 0.25)',
+      bgSelected: 'rgba(0, 255, 136, 0.25)',
+      text: '#00ff88',
+      shadow: 'rgba(0, 255, 136, 0.4)',
+      shadowGlow: 'rgba(0, 255, 136, 0.2)',
+      shadowHover: 'rgba(0, 255, 136, 0.3)'
+    }
+  } else if (gradeClass === 'grade-yellow') {
+    return {
+      border: '#ffd700',
+      bg: 'rgba(255, 215, 0, 0.15)',
+      bgHover: 'rgba(255, 215, 0, 0.25)',
+      bgSelected: 'rgba(255, 215, 0, 0.25)',
+      text: '#ffd700',
+      shadow: 'rgba(255, 215, 0, 0.4)',
+      shadowGlow: 'rgba(255, 215, 0, 0.2)',
+      shadowHover: 'rgba(255, 215, 0, 0.3)'
+    }
+  } else if (gradeClass === 'grade-red') {
+    return {
+      border: '#ff4444',
+      bg: 'rgba(255, 68, 68, 0.15)',
+      bgHover: 'rgba(255, 68, 68, 0.25)',
+      bgSelected: 'rgba(255, 68, 68, 0.25)',
+      text: '#ff4444',
+      shadow: 'rgba(255, 68, 68, 0.4)',
+      shadowGlow: 'rgba(255, 68, 68, 0.2)',
+      shadowHover: 'rgba(255, 68, 68, 0.3)'
+    }
+  }
+  return {
+    border: 'rgba(255, 255, 255, 0.2)',
+    bg: 'rgba(255, 255, 255, 0.05)',
+    bgHover: 'rgba(255, 255, 255, 0.1)',
+    bgSelected: 'rgba(255, 255, 255, 0.1)',
+    text: '#fff',
+    shadow: 'rgba(255, 255, 255, 0.2)',
+    shadowGlow: 'rgba(255, 255, 255, 0.1)',
+    shadowHover: 'rgba(255, 255, 255, 0.15)'
+  }
+}
+
 export default function ViewStudent({ user }) {
   const { studentId } = useParams()
   const navigate = useNavigate()
@@ -1200,41 +1248,70 @@ function ManeuverCard({ maneuver, customRunways }) {
                   <div className="grade-breakdown">
                     {details.gradeDetails.phaseGrades && Object.keys(details.gradeDetails.phaseGrades).length > 0 ? (
                       <>
-                        <h3>Phase Grades</h3>
-                        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                        <h3 style={{ marginBottom: '16px', display: 'block', width: '100%' }}>Phase Grades</h3>
+                        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', width: '100%', justifyContent: 'center' }}>
                           {Object.entries(details.gradeDetails.phaseGrades).map(([phase, grade]) => {
                             const phaseName = phase.charAt(0).toUpperCase() + phase.slice(1)
                             const isSelected = selectedPhase === phase
+                            const colors = getGradeColors(grade)
                             return (
                               <button
                                 key={phase}
                                 onClick={() => setSelectedPhase(isSelected ? null : phase)}
+                                className={`phase-button ${getGradeColorClass(grade)} ${isSelected ? 'selected' : ''}`}
                                 style={{
-                                  padding: '8px 16px',
-                                  borderRadius: '6px',
-                                  border: `2px solid ${isSelected ? '#4CAF50' : 'rgba(255, 255, 255, 0.2)'}`,
-                                  backgroundColor: isSelected ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                                  padding: '10px 18px',
+                                  borderRadius: '8px',
+                                  border: `2px solid ${isSelected ? colors.border : colors.border}`,
+                                  backgroundColor: isSelected ? colors.bgSelected : colors.bg,
                                   color: '#fff',
                                   cursor: 'pointer',
-                                  fontWeight: isSelected ? '600' : '400',
-                                  transition: 'all 0.2s',
+                                  fontWeight: isSelected ? '600' : '500',
+                                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: '8px'
+                                  justifyContent: 'center',
+                                  gap: '10px',
+                                  fontSize: '14px',
+                                  boxShadow: isSelected 
+                                    ? `0 0 0 1px ${colors.shadow}, 0 4px 12px ${colors.shadowGlow}`
+                                    : '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                  transform: isSelected ? 'translateY(-1px)' : 'translateY(0)',
+                                  position: 'relative',
+                                  overflow: 'hidden'
                                 }}
                                 onMouseEnter={(e) => {
                                   if (!isSelected) {
-                                    e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
+                                    e.currentTarget.style.backgroundColor = colors.bgHover
+                                    e.currentTarget.style.transform = 'translateY(-2px)'
+                                    e.currentTarget.style.boxShadow = `0 4px 12px ${colors.shadowHover}`
                                   }
                                 }}
                                 onMouseLeave={(e) => {
                                   if (!isSelected) {
-                                    e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.05)'
+                                    e.currentTarget.style.backgroundColor = colors.bg
+                                    e.currentTarget.style.transform = 'translateY(0)'
+                                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)'
                                   }
                                 }}
                               >
-                                <span>{phaseName}</span>
-                                <span className={getGradeColorClass(grade)} style={{ fontWeight: '600' }}>
+                                <span style={{ 
+                                  fontSize: '13px',
+                                  letterSpacing: '0.3px',
+                                  opacity: 0.9
+                                }}>
+                                  {phaseName}
+                                </span>
+                                <span 
+                                  className={getGradeColorClass(grade)} 
+                                  style={{ 
+                                    fontWeight: '700',
+                                    fontSize: '15px',
+                                    fontFamily: "'Consolas', 'Courier New', monospace",
+                                    color: colors.text,
+                                    textShadow: `0 0 8px ${colors.shadow}`
+                                  }}
+                                >
                                   {grade}
                                 </span>
                               </button>
@@ -1297,6 +1374,13 @@ function ManeuverCard({ maneuver, customRunways }) {
                             </div>
                           </div>
                         )}
+                        {details.gradeDetails.notes && details.gradeDetails.notes.length > 0 && (
+                          <div style={{ marginTop: '12px', padding: '8px', backgroundColor: 'rgba(255, 193, 7, 0.15)', borderRadius: '4px', fontSize: '0.9rem', border: '1px solid rgba(255, 193, 7, 0.3)', color: '#fff', width: '100%', display: 'block', clear: 'both' }}>
+                            {details.gradeDetails.notes.map((note, idx) => (
+                              <div key={idx}>{note}</div>
+                            ))}
+                          </div>
+                        )}
                       </>
                     ) : details.gradeDetails.breakdown && (
                       <>
@@ -1355,6 +1439,13 @@ function ManeuverCard({ maneuver, customRunways }) {
                             </span>
                           </div>
                         </div>
+                        {details.gradeDetails.notes && details.gradeDetails.notes.length > 0 && (
+                          <div style={{ marginTop: '12px', padding: '8px', backgroundColor: 'rgba(255, 193, 7, 0.15)', borderRadius: '4px', fontSize: '0.9rem', border: '1px solid rgba(255, 193, 7, 0.3)', color: '#fff', width: '100%', display: 'block', clear: 'both' }}>
+                            {details.gradeDetails.notes.map((note, idx) => (
+                              <div key={idx}>{note}</div>
+                            ))}
+                          </div>
+                        )}
                       </>
                     )}
                   </div>
@@ -1401,6 +1492,34 @@ function ManeuverCard({ maneuver, customRunways }) {
                         {details.touchdown.firmness || 'normal'}
                       </span>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {details.gatesPassed && details.gatesPassed.length > 0 && (
+                <div className="details-section">
+                  <h3>Gates Passed</h3>
+                  <div className="gates-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {details.gatesPassed.map((gate, idx) => (
+                      <div key={idx} className={`gate-item ${gate.compliant ? 'pass' : 'fail'}`} style={{
+                        padding: '12px',
+                        borderRadius: '6px',
+                        border: `1px solid ${gate.compliant ? 'rgba(0, 255, 136, 0.3)' : 'rgba(255, 68, 68, 0.3)'}`,
+                        backgroundColor: gate.compliant ? 'rgba(0, 255, 136, 0.1)' : 'rgba(255, 68, 68, 0.1)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div className="gate-name" style={{ fontWeight: '600', fontSize: '14px' }}>{gate.gate}</div>
+                        <div className="gate-details" style={{ display: 'flex', gap: '12px', alignItems: 'center', fontSize: '13px' }}>
+                          <span>Alt: {Math.round(gate.actualAltitude)} ft</span>
+                          <span>Dev: {gate.altitudeDeviation > 0 ? '+' : ''}{Math.round(gate.altitudeDeviation)} ft</span>
+                          <span className={gate.compliant ? 'pass' : 'fail'} style={{ fontWeight: '600', fontSize: '16px' }}>
+                            {gate.compliant ? '✓' : '✗'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1467,41 +1586,70 @@ function ManeuverCard({ maneuver, customRunways }) {
                   <div className="grade-breakdown">
                     {details.gradeDetails.phaseGrades && Object.keys(details.gradeDetails.phaseGrades).length > 0 ? (
                       <>
-                        <h3>Phase Grades</h3>
-                        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                        <h3 style={{ marginBottom: '16px', display: 'block', width: '100%' }}>Phase Grades</h3>
+                        <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', width: '100%', justifyContent: 'center' }}>
                           {Object.entries(details.gradeDetails.phaseGrades).map(([phase, grade]) => {
                             const phaseName = phase.charAt(0).toUpperCase() + phase.slice(1)
                             const isSelected = selectedPhase === phase
+                            const colors = getGradeColors(grade)
                             return (
                               <button
                                 key={phase}
                                 onClick={() => setSelectedPhase(isSelected ? null : phase)}
+                                className={`phase-button ${getGradeColorClass(grade)} ${isSelected ? 'selected' : ''}`}
                                 style={{
-                                  padding: '8px 16px',
-                                  borderRadius: '6px',
-                                  border: `2px solid ${isSelected ? '#4CAF50' : 'rgba(255, 255, 255, 0.2)'}`,
-                                  backgroundColor: isSelected ? 'rgba(76, 175, 80, 0.2)' : 'rgba(255, 255, 255, 0.05)',
+                                  padding: '10px 18px',
+                                  borderRadius: '8px',
+                                  border: `2px solid ${isSelected ? colors.border : colors.border}`,
+                                  backgroundColor: isSelected ? colors.bgSelected : colors.bg,
                                   color: '#fff',
                                   cursor: 'pointer',
-                                  fontWeight: isSelected ? '600' : '400',
-                                  transition: 'all 0.2s',
+                                  fontWeight: isSelected ? '600' : '500',
+                                  transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                                   display: 'flex',
                                   alignItems: 'center',
-                                  gap: '8px'
+                                  justifyContent: 'center',
+                                  gap: '10px',
+                                  fontSize: '14px',
+                                  boxShadow: isSelected 
+                                    ? `0 0 0 1px ${colors.shadow}, 0 4px 12px ${colors.shadowGlow}`
+                                    : '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                  transform: isSelected ? 'translateY(-1px)' : 'translateY(0)',
+                                  position: 'relative',
+                                  overflow: 'hidden'
                                 }}
                                 onMouseEnter={(e) => {
                                   if (!isSelected) {
-                                    e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'
+                                    e.currentTarget.style.backgroundColor = colors.bgHover
+                                    e.currentTarget.style.transform = 'translateY(-2px)'
+                                    e.currentTarget.style.boxShadow = `0 4px 12px ${colors.shadowHover}`
                                   }
                                 }}
                                 onMouseLeave={(e) => {
                                   if (!isSelected) {
-                                    e.target.style.backgroundColor = 'rgba(255, 255, 255, 0.05)'
+                                    e.currentTarget.style.backgroundColor = colors.bg
+                                    e.currentTarget.style.transform = 'translateY(0)'
+                                    e.currentTarget.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.1)'
                                   }
                                 }}
                               >
-                                <span>{phaseName}</span>
-                                <span className={getGradeColorClass(grade)} style={{ fontWeight: '600' }}>
+                                <span style={{ 
+                                  fontSize: '13px',
+                                  letterSpacing: '0.3px',
+                                  opacity: 0.9
+                                }}>
+                                  {phaseName}
+                                </span>
+                                <span 
+                                  className={getGradeColorClass(grade)} 
+                                  style={{ 
+                                    fontWeight: '700',
+                                    fontSize: '15px',
+                                    fontFamily: "'Consolas', 'Courier New', monospace",
+                                    color: colors.text,
+                                    textShadow: `0 0 8px ${colors.shadow}`
+                                  }}
+                                >
                                   {grade}
                                 </span>
                               </button>
@@ -1562,6 +1710,13 @@ function ManeuverCard({ maneuver, customRunways }) {
                                 )
                               })}
                             </div>
+                          </div>
+                        )}
+                        {details.gradeDetails.notes && details.gradeDetails.notes.length > 0 && (
+                          <div style={{ marginTop: '12px', padding: '8px', backgroundColor: 'rgba(255, 193, 7, 0.15)', borderRadius: '4px', fontSize: '0.9rem', border: '1px solid rgba(255, 193, 7, 0.3)', color: '#fff', width: '100%', display: 'block', clear: 'both' }}>
+                            {details.gradeDetails.notes.map((note, idx) => (
+                              <div key={idx}>{note}</div>
+                            ))}
                           </div>
                         )}
                       </>
@@ -1635,6 +1790,13 @@ function ManeuverCard({ maneuver, customRunways }) {
                             </span>
                           </div>
                         </div>
+                        {details.gradeDetails.notes && details.gradeDetails.notes.length > 0 && (
+                          <div style={{ marginTop: '12px', padding: '8px', backgroundColor: 'rgba(255, 193, 7, 0.15)', borderRadius: '4px', fontSize: '0.9rem', border: '1px solid rgba(255, 193, 7, 0.3)', color: '#fff', width: '100%', display: 'block', clear: 'both' }}>
+                            {details.gradeDetails.notes.map((note, idx) => (
+                              <div key={idx}>{note}</div>
+                            ))}
+                          </div>
+                        )}
                       </>
                     )}
                   </div>

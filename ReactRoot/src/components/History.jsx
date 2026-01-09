@@ -540,7 +540,7 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                 {details.gradeDetails.phaseGrades && Object.keys(details.gradeDetails.phaseGrades).length > 0 ? (
                   <>
                     <h3 style={{ marginBottom: '16px', display: 'block', width: '100%' }}>Phase Grades</h3>
-                    <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', width: '100%' }}>
+                    <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', width: '100%', justifyContent: 'center' }}>
                       {Object.entries(details.gradeDetails.phaseGrades).map(([phase, grade]) => {
                         const phaseName = phase.charAt(0).toUpperCase() + phase.slice(1)
                         const isSelected = selectedPhase === phase
@@ -561,6 +561,7 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                               transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                               display: 'flex',
                               alignItems: 'center',
+                              justifyContent: 'center',
                               gap: '10px',
                               fontSize: '14px',
                               boxShadow: isSelected 
@@ -1043,6 +1044,33 @@ function ManeuverCard({ maneuver, onDelete, customRunways }) {
                 </div>
               )}
 
+              {details.gatesPassed && details.gatesPassed.length > 0 && (
+                <div className="details-section">
+                  <h3>Gates Passed</h3>
+                  <div className="gates-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    {details.gatesPassed.map((gate, idx) => (
+                      <div key={idx} className={`gate-item ${gate.compliant ? 'pass' : 'fail'}`} style={{
+                        padding: '12px',
+                        borderRadius: '6px',
+                        border: `1px solid ${gate.compliant ? 'rgba(0, 255, 136, 0.3)' : 'rgba(255, 68, 68, 0.3)'}`,
+                        backgroundColor: gate.compliant ? 'rgba(0, 255, 136, 0.1)' : 'rgba(255, 68, 68, 0.1)',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center'
+                      }}>
+                        <div className="gate-name" style={{ fontWeight: '600', fontSize: '14px' }}>{gate.gate}</div>
+                        <div className="gate-details" style={{ display: 'flex', gap: '12px', alignItems: 'center', fontSize: '13px' }}>
+                          <span>Alt: {Math.round(gate.actualAltitude)} ft</span>
+                          <span>Dev: {gate.altitudeDeviation > 0 ? '+' : ''}{Math.round(gate.altitudeDeviation)} ft</span>
+                          <span className={gate.compliant ? 'pass' : 'fail'} style={{ fontWeight: '600', fontSize: '16px' }}>
+                            {gate.compliant ? '✓' : '✗'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {details.runway && (
                 <div className="details-section">
